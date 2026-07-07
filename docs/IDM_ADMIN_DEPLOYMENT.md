@@ -128,11 +128,270 @@ curl -X POST http://localhost:3010/admin/target-systems \
 - `name` - стабильный routing key для IDM; именно это значение указывается в
   `targetSystem`.
 - `type` - тип коннектора (`zabbix`, `cmdbuild`, `passwork`, `rest`, `db`,
-  `fake` или
+  `fake`, `consultant-plus` или
   другой зарегистрированный connector type).
 - `config` хранит параметры конкретного инстанса целевой системы.
 - После create/update/delete idmMw автоматически перезагружает registry;
   перезапуск приложения для изменения `TargetSystem.config` не нужен.
+
+ConsultantPlus example:
+
+```bash
+curl -X POST http://localhost:3010/admin/target-systems \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "consultant-test",
+    "type": "consultant-plus",
+    "label": "ConsultantPlus Login Surface",
+    "config": {
+      "baseUrl": "https://login.consultant.ru",
+      "apiBaseUrl": "https://cloud.consultant.ru",
+      "allowedHosts": ["login.consultant.ru", "cloud.consultant.ru"],
+      "login": "REPLACE_WITH_OPERATOR_LOGIN",
+      "password": "REPLACE_WITH_SECRET",
+      "protectedOperatorLogin": "1393020",
+      "managedLoginPrefix": "REPLACE_WITH_OPERATOR_LOGIN",
+      "userCreatePath": "/cloud/cgi/online.cgi?",
+      "userCreateMethod": "POST",
+      "userCreateContentType": "form",
+      "userCreatePayload": {
+        "req": "admin",
+        "op": "admadd",
+        "rnd": "${rnd}",
+        "login": "${pureLogin}",
+        "email": "${email}",
+        "fio": "${fullName}"
+      },
+      "userUpdatePath": "/cloud/cgi/online.cgi?",
+      "userUpdateMethod": "POST",
+      "userUpdateContentType": "form",
+      "userUpdatePayload": {
+        "req": "admin",
+        "op": "admupd",
+        "rnd": "${rnd}",
+        "login": "${managedLogin}",
+        "email": "${email}",
+        "fio": "${fullName}"
+      },
+      "userChangePasswordPath": "/cloud/cgi/online.cgi?",
+      "userChangePasswordMethod": "POST",
+      "userChangePasswordContentType": "form",
+      "userChangePasswordPayload": {
+        "req": "admin",
+        "op": "admupd",
+        "rnd": "${rnd}",
+        "login": "${managedLogin}",
+        "email": "${email}",
+        "fio": "${fullName}"
+      },
+      "userBlockPath": "/cloud/cgi/online.cgi?",
+      "userBlockMethod": "POST",
+      "userBlockContentType": "form",
+      "userBlockPayload": {
+        "req": "admin",
+        "op": "admdismiss",
+        "rnd": "${rnd}",
+        "logins": "${managedLogin}"
+      },
+      "userDeletePath": "/cloud/cgi/online.cgi?",
+      "userDeleteMethod": "POST",
+      "userDeleteContentType": "form",
+      "userDeletePayload": {
+        "req": "admin",
+        "op": "admdel",
+        "rnd": "${rnd}",
+        "logins": "${managedLogin}"
+      },
+      "timeout": 15000
+    },
+    "enabled": true
+  }'
+```
+
+`consultant-plus` connector is intentionally conservative. It supports
+`system.test`, `schema.get`, and only configured write operations:
+`user.create`, `user.update`, `user.changePassword`, `user.disable`,
+`user.lock`, `user.delete`. По authenticated browser/manual анализу от
+2026-07-06 подтвержден cloud admin CGI surface:
+
+- `GET https://cloud.consultant.ru/cloud/cgi/online.cgi?req=admin&op=admusrlist`
+  возвращает список пользователей и использовался только для проверки.
+- `POST https://cloud.consultant.ru/cloud/cgi/online.cgi?` создает
+  пользователя form payload `req=admin`, `op=admadd`, `rnd`, `login`, `email`,
+  `fio`.
+- `POST https://cloud.consultant.ru/cloud/cgi/online.cgi?` меняет
+  пользователя или инициирует password reset form payload `req=admin`,
+  `op=admupd`, `rnd`, `login=${managedLogin}`, `email`, `fio`. Задать пароль
+  через idmMw нельзя: ConsultantPlus генерирует пароль и отправляет его на email
+  пользователя.
+- `POST https://cloud.consultant.ru/cloud/cgi/online.cgi?` блокирует/отключает
+  пользователя form payload `req=admin`, `op=admdismiss`, `rnd`, `logins`.
+- `POST https://cloud.consultant.ru/cloud/cgi/online.cgi?` удаляет пользователя
+  form payload `req=admin`, `op=admdel`, `rnd`, `logins`.
+
+Для create connector вычисляет `pureLogin` из email/username local-part, поэтому
+`lyapin@gkm.ru` отправляется как `login=lyapin`. Для block/delete connector
+вычисляет `managedLogin` как `<managedLoginPrefix>#<pureLogin>`, например
+`1393020#lyapin`. Если `managedLoginPrefix` не указан, используется
+операторский `config.login`. Read/search/enable/unlock/group/sync operations
+remain unsupported; public `user.search` для поиска пользователя не вызывается.
+It also refuses operations that target `protectedOperatorLogin` directly.
+
+URL policy is deny-by-default outside ConsultantPlus: `baseUrl`, `apiBaseUrl`
+and auth return redirects must use HTTPS and a host from `allowedHosts`.
+Configured endpoint paths (`userCreatePath`, `userUpdatePath`, etc.) must be
+relative paths such as `/cloud/cgi/online.cgi?`; absolute endpoint URLs are
+rejected before HTTP calls.
+
+`user.changePassword` means ConsultantPlus password reset, not setting a
+caller-supplied password. `payload.data.password`, `pwd`, `newValue`, and
+configured payload templates that reference those fields are rejected. For the
+cloud `admupd` flow Avanpost/idmMw must provide `email` plus either
+`managedLogin` or attributes from which idmMw derives it. On success idmMw may
+return safe metadata only: `passwordKnown=false`, `passwordDelivery=email`,
+`passwordAction=reset`, `managedLogin`, and `email`.
+
+Если операторские реквизиты должны приходить из PAM/env, не храните пароль в
+DB-backed `TargetSystem.config`. Задайте `loginEnv` и `passwordEnv`, а сами env
+пусть будут обычными значениями или `secret://...`, разрешаемыми штатным
+`SECRETS_PROVIDER=IndeedPamAapm` на startup:
+
+```json
+{
+  "loginEnv": "CONSULTANT_PLUS_OPERATOR_LOGIN",
+  "passwordEnv": "CONSULTANT_PLUS_OPERATOR_PASSWORD"
+}
+```
+
+Для configured paths можно использовать placeholders: `{id}`, `{userId}`,
+`{login}`, `{username}`, `{email}`, `{pureLogin}`, `{managedLogin}`. Если
+placeholder указан, Avanpost payload должен передать соответствующее значение
+в `params` или `data`.
+
+Для безопасного browser discovery ConsultantPlus используется Playwright
+tooling:
+
+```bash
+CONSULTANT_LOGIN='REPLACE_WITH_OPERATOR_LOGIN' \
+CONSULTANT_PASSWORD='REPLACE_WITH_SECRET' \
+npm run consultant:discover
+```
+
+Скрипт пишет redacted report в `/tmp/idmmw-consultant-discover-*` и не
+сохраняет cookies, CSRF, session id или пароль в репозитории.
+Это dev-only tooling для discovery/live verification; production idmMw runtime
+не должен зависеть от браузерной DOM automation. По умолчанию script разрешает
+только `login.consultant.ru` и `cloud.consultant.ru`; override делается через
+`CONSULTANT_ALLOWED_HOSTS`. `--no-sandbox` и `ignoreHTTPSErrors` включаются
+только явно через `CONSULTANT_CHROME_NO_SANDBOX=true` и
+`CONSULTANT_IGNORE_HTTPS_ERRORS=true`.
+
+Если ручной вход в браузере успешен, а headless Playwright получает
+`WRONG_PASSWORD`, запустите headed trace через system Chrome. Передавайте пароль
+через stdin/current process, а не в shell history:
+
+```bash
+stty -echo
+read -r CONSULTANT_LOGIN
+read -r CONSULTANT_PASSWORD
+stty echo
+export CONSULTANT_LOGIN CONSULTANT_PASSWORD
+CONSULTANT_HEADLESS=false \
+CONSULTANT_LOGIN_TRACE=true \
+CONSULTANT_TRACE_LEVEL=basic \
+CONSULTANT_CHROME_EXECUTABLE=/usr/bin/google-chrome \
+npm run consultant:discover
+```
+
+`CONSULTANT_LOGIN_TRACE=true` добавляет в report безопасный login trace:
+форму входа без значений полей, результат `/check-agreement/`, первый
+auth-related response и итоговую классификацию причины
+`wrong-password`, `agreement-required`, `captcha-or-antiautomation`,
+`auth-timeout`, `still-guest` или `cloud-unreachable`. Даже в
+`CONSULTANT_TRACE_LEVEL=verbose` cookies, CSRF, auth pid, session id, login и
+password редактируются. После успешного headed discovery можно повторить
+`consultant:live-cycle` с теми же env.
+
+Для полного live cycle create/update/passwordReset/block/delete используется:
+
+```bash
+CONSULTANT_LOGIN='REPLACE_WITH_OPERATOR_LOGIN' \
+CONSULTANT_PASSWORD='REPLACE_WITH_SECRET' \
+CONSULTANT_API_BASE_URL='https://cloud.consultant.ru' \
+npm run consultant:live-cycle
+```
+
+`consultant:live-cycle` генерирует двух пользователей `mwtd<run>@gkm.ru` и
+`mwtk<run>@gkm.ru`. Первый проходит create -> update -> passwordReset -> block
+-> delete. Второй проходит create -> passwordReset и остается в ConsultantPlus.
+Логин оставленного пользователя - `managedLogin` вида `<operator>#<pureLogin>`.
+Пароль idmMw не знает и не сохраняет: ConsultantPlus отправляет созданный или
+сброшенный пароль на email пользователя. Поэтому
+`live-cycle-credentials.json` больше не создается; в stdout/report выводятся
+`passwordKnown=false` и `passwordDelivery=email`. Delete в live-cycle разрешен
+только для пользователя текущего run. Script не принимает
+`CONSULTANT_TARGET_PASSWORD` как управляемый пароль и fail-fast отклоняет
+`password`, `pwd` или `newValue` в live payload JSON.
+
+Для проверки массового создания и постраничного списка используется:
+
+```bash
+CONSULTANT_LOGIN='REPLACE_WITH_OPERATOR_LOGIN' \
+CONSULTANT_PASSWORD='REPLACE_WITH_SECRET' \
+CONSULTANT_API_BASE_URL='https://cloud.consultant.ru' \
+npm run consultant:bulk-pagination
+```
+
+По умолчанию `consultant:bulk-pagination` пытается создать 30 временных
+пользователей `mwtb<run><NN>@gkm.ru`, проверить `admusrlist` с `pgsize=25` на
+страницах 1 и 2, затем удалить всех созданных пользователей. До мутаций есть
+gate: если `allowedusers <= pgsize`, свободных слотов меньше запрошенного числа
+или после создания общее число пользователей не превысит `pgsize`, скрипт
+завершится с `blocked=true` и не создаст пользователей. Количество можно
+изменить через `CONSULTANT_BULK_USER_COUNT`, размер страницы - через
+`CONSULTANT_BULK_PAGE_SIZE`.
+
+Для точечного создания пользователя через найденный API:
+
+```bash
+CONSULTANT_LOGIN='REPLACE_WITH_OPERATOR_LOGIN' \
+CONSULTANT_PASSWORD='REPLACE_WITH_SECRET' \
+CONSULTANT_API_BASE_URL='https://cloud.consultant.ru' \
+CONSULTANT_USER_CREATE_ENDPOINT='/cloud/cgi/online.cgi?' \
+CONSULTANT_USER_CREATE_CONTENT_TYPE='form' \
+CONSULTANT_USER_CREATE_PAYLOAD_JSON='{"req":"admin","op":"admadd","rnd":"${rnd}","login":"${pureLogin}","email":"${email}","fio":"${fullName}"}' \
+npm run consultant:live-create
+```
+
+Для update/password-reset/delete/block доступны аналогичные scripts:
+
+```bash
+npm run consultant:live-update
+npm run consultant:live-change-password
+npm run consultant:live-block
+npm run consultant:live-delete
+```
+
+Для точечной блокировки без поиска пользователя задайте endpoint и явный
+идентификатор:
+
+```bash
+CONSULTANT_LOGIN='REPLACE_WITH_OPERATOR_LOGIN' \
+CONSULTANT_PASSWORD='REPLACE_WITH_SECRET' \
+CONSULTANT_API_BASE_URL='https://cloud.consultant.ru' \
+CONSULTANT_TARGET_USERNAME='lyapin@gkm.ru' \
+CONSULTANT_USER_BLOCK_ENDPOINT='/cloud/cgi/online.cgi?' \
+CONSULTANT_USER_BLOCK_CONTENT_TYPE='form' \
+CONSULTANT_USER_BLOCK_PAYLOAD_JSON='{"req":"admin","op":"admdismiss","rnd":"${rnd}","logins":"${managedLogin}"}' \
+npm run consultant:live-block
+```
+
+`consultant:live-block` не выполняет поиск пользователя. Для ConsultantPlus
+cloud admin block достаточно `CONSULTANT_TARGET_USERNAME`/`CONSULTANT_TARGET_PURE_LOGIN`
+и вычисленного `${managedLogin}`. Если другой endpoint принимает id или email,
+используйте соответствующий placeholder в `CONSULTANT_USER_BLOCK_ENDPOINT` и
+задайте `CONSULTANT_TARGET_USER_ID`, `CONSULTANT_TARGET_EMAIL` или
+`CONSULTANT_TARGET_USERNAME`.
 
 Для Passwork connector v1 управляет пользователями и группами через HTTP API
 Passwork: `/api/v1/users`, `/api/v1/user-groups`,
@@ -601,11 +860,11 @@ decrypted secret operations are intentionally out of scope for this connector.
 
 Response semantics:
 
-| Тип операции                                                       | Поведение                                                                                                                 |
-| ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------- |
-| Write (`user.create`, `group.addMember`, ...)                      | Возвращает `received=true`, `processed=true`, без `data`. При сбое после retry событие попадает в DLQ.                    |
-| Read/test/sync (`user.get`, `system.test`, `schema.get`, `sync.*`) | Возвращает `received=true`, `processed=true`, `data` с ответом целевой системы. При ошибке возвращает HTTP error без DLQ. |
-| Duplicate `eventId`                                                | Возвращает `received=true`, `processed=false`; вызов целевой системы не выполняется.                                      |
+| Тип операции                                                       | Поведение                                                                                                                                                                                                                                                                   |
+| ------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Write (`user.create`, `group.addMember`, ...)                      | Обычно возвращает `received=true`, `processed=true`, без `data`. При сбое после retry событие попадает в DLQ. ConsultantPlus password reset/create может вернуть только safe metadata без пароля: `passwordKnown=false`, `passwordDelivery=email`, `managedLogin`, `email`. |
+| Read/test/sync (`user.get`, `system.test`, `schema.get`, `sync.*`) | Возвращает `received=true`, `processed=true`, `data` с ответом целевой системы. При ошибке возвращает HTTP error без DLQ.                                                                                                                                                   |
+| Duplicate `eventId`                                                | Возвращает `received=true`, `processed=false`; вызов целевой системы не выполняется.                                                                                                                                                                                        |
 
 ## Проверка настройки
 

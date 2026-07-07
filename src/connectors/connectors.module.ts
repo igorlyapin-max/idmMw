@@ -8,6 +8,7 @@ import { ZabbixConnectorService } from './implementations/zabbix-connector/zabbi
 import { CmdbuildConnectorService } from './implementations/cmdbuild-connector/cmdbuild-connector.service';
 import { FakeConnectorService } from './implementations/fake-connector/fake-connector.service';
 import { PassworkConnectorService } from './implementations/passwork-connector/passwork-connector.service';
+import { ConsultantPlusConnectorService } from './implementations/consultant-plus-connector/consultant-plus-connector.service';
 
 @Module({
   imports: [HttpModule, PrismaModule],
@@ -19,6 +20,7 @@ import { PassworkConnectorService } from './implementations/passwork-connector/p
     CmdbuildConnectorService,
     FakeConnectorService,
     PassworkConnectorService,
+    ConsultantPlusConnectorService,
   ],
   exports: [ConnectorRegistry],
 })

@@ -71,8 +71,12 @@ export class WebhookService {
       }
 
       // Write operations go through the dispatcher for retry + DLQ + Kafka.
-      await this.dispatcher.dispatch(dto);
-      return { processed: true };
+      const result = await this.dispatcher.dispatch(dto);
+      const data = this.safeWriteResponseData(result?.data);
+      return {
+        processed: true,
+        ...(data !== undefined ? { data } : {}),
+      };
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : String(error);
       this.logger.error(`Failed to process webhook ${dto.eventId}: ${msg}`);
@@ -81,5 +85,19 @@ export class WebhookService {
       }
       throw error;
     }
+  }
+
+  private safeWriteResponseData(data: unknown): unknown | undefined {
+    if (!data || typeof data !== 'object' || Array.isArray(data)) {
+      return undefined;
+    }
+    const metadata = data as Record<string, unknown>;
+    if (
+      metadata['passwordDelivery'] === 'email' &&
+      metadata['passwordKnown'] === false
+    ) {
+      return metadata;
+    }
+    return undefined;
   }
 }

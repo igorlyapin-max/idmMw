@@ -3,6 +3,7 @@ import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 
 const originalMockIdmEnabled = process.env['MOCK_IDM_ENABLED'];
+const originalMockIdmMiddlewareUrl = process.env['MOCK_IDM_MIDDLEWARE_URL'];
 process.env['MOCK_IDM_ENABLED'] = 'true';
 
 const { AppModule } =
@@ -15,6 +16,14 @@ interface MockIdmResponse {
   };
 }
 
+function setMockIdmMiddlewareUrl(app: INestApplication): void {
+  const address = app.getHttpServer().address();
+  if (!address || typeof address === 'string') {
+    throw new Error('Test app must listen on a TCP port');
+  }
+  process.env['MOCK_IDM_MIDDLEWARE_URL'] = `http://127.0.0.1:${address.port}`;
+}
+
 describe('Mock IDM (e2e)', () => {
   let app: INestApplication;
 
@@ -24,7 +33,8 @@ describe('Mock IDM (e2e)', () => {
     }).compile();
 
     app = moduleFixture.createNestApplication();
-    await app.init();
+    await app.listen(0, '127.0.0.1');
+    setMockIdmMiddlewareUrl(app);
   });
 
   it('POST /mock-idm/scenario/user-create', async () => {
@@ -46,12 +56,20 @@ describe('Mock IDM (e2e)', () => {
     expect(body.success).toBe(true);
   });
 
-  afterAll(async () => {
+  afterEach(async () => {
     await app.close();
+  });
+
+  afterAll(async () => {
     if (originalMockIdmEnabled === undefined) {
       delete process.env['MOCK_IDM_ENABLED'];
     } else {
       process.env['MOCK_IDM_ENABLED'] = originalMockIdmEnabled;
+    }
+    if (originalMockIdmMiddlewareUrl === undefined) {
+      delete process.env['MOCK_IDM_MIDDLEWARE_URL'];
+    } else {
+      process.env['MOCK_IDM_MIDDLEWARE_URL'] = originalMockIdmMiddlewareUrl;
     }
   });
 });

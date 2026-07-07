@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { ProcessingService } from '../core/processing.service';
 import { KafkaProducerService } from '../kafka/kafka-producer.service';
 import type { AvanpostWebhookDto } from '../inbound/webhooks/webhook.controller';
+import type { ConnectorResult } from '../connectors/connector.interface';
 
 /**
  * DispatcherService — the bridge between inbound webhooks and the processing layer.
@@ -37,7 +38,9 @@ export class DispatcherService {
    * After processing (success or failure) an optional Kafka message
    * is sent to topic `idm.events.out` for downstream consumers.
    */
-  async dispatch(dto: AvanpostWebhookDto): Promise<void> {
+  async dispatch(
+    dto: AvanpostWebhookDto,
+  ): Promise<ConnectorResult | undefined> {
     const kafkaEnabled = this.config.get<boolean>('KAFKA_ENABLED') ?? false;
     const processingMode =
       this.config.get<string>('IDMMW_PROCESSING_MODE') ?? 'sync';
@@ -64,7 +67,7 @@ export class DispatcherService {
 
     try {
       // Core execution: route to the concrete connector via registry lookup.
-      await this.processing.process({
+      const result = await this.processing.process({
         eventId: dto.eventId,
         operation: dto.operation,
         targetSystem: dto.targetSystem,
@@ -81,6 +84,7 @@ export class DispatcherService {
           status: 'success',
         });
       }
+      return result;
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : String(error);
       this.logger.error(`Dispatch failed for event ${dto.eventId}: ${msg}`);

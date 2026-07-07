@@ -29,7 +29,7 @@ describe('WebhookService', () => {
 
   it('should process new write webhook', async () => {
     idempotency.checkAndLock.mockResolvedValue(true);
-    dispatcher.dispatch.mockResolvedValue(undefined);
+    dispatcher.dispatch.mockResolvedValue({ success: true });
 
     const result = await service.processWebhook({
       eventId: 'e1',
@@ -44,6 +44,57 @@ describe('WebhookService', () => {
       3600,
     );
     expect(dispatcher.dispatch).toHaveBeenCalled();
+  });
+
+  it('should return safe password delivery metadata for write webhooks', async () => {
+    idempotency.checkAndLock.mockResolvedValue(true);
+    dispatcher.dispatch.mockResolvedValue({
+      success: true,
+      data: {
+        status: 200,
+        managedLogin: '1393020#mwtd123',
+        email: 'mwtd123@gkm.ru',
+        passwordAction: 'reset',
+        passwordDelivery: 'email',
+        passwordKnown: false,
+      },
+    });
+
+    const result = await service.processWebhook({
+      eventId: 'e1',
+      operation: 'user.changePassword',
+      targetSystem: 'consultant-test',
+      payload: {},
+    });
+
+    expect(result).toEqual({
+      processed: true,
+      data: {
+        status: 200,
+        managedLogin: '1393020#mwtd123',
+        email: 'mwtd123@gkm.ru',
+        passwordAction: 'reset',
+        passwordDelivery: 'email',
+        passwordKnown: false,
+      },
+    });
+  });
+
+  it('should not expose generic write connector data', async () => {
+    idempotency.checkAndLock.mockResolvedValue(true);
+    dispatcher.dispatch.mockResolvedValue({
+      success: true,
+      data: { id: 'user-1', status: 'created' },
+    });
+
+    const result = await service.processWebhook({
+      eventId: 'e1',
+      operation: 'user.create',
+      targetSystem: 'fake',
+      payload: {},
+    });
+
+    expect(result).toEqual({ processed: true });
   });
 
   it('should process new read webhook and return data', async () => {

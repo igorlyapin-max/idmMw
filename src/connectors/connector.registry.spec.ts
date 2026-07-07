@@ -9,6 +9,7 @@ import { ZabbixConnectorService } from './implementations/zabbix-connector/zabbi
 import { CmdbuildConnectorService } from './implementations/cmdbuild-connector/cmdbuild-connector.service';
 import { FakeConnectorService } from './implementations/fake-connector/fake-connector.service';
 import { PassworkConnectorService } from './implementations/passwork-connector/passwork-connector.service';
+import { ConsultantPlusConnectorService } from './implementations/consultant-plus-connector/consultant-plus-connector.service';
 
 type MockConnector = {
   name: string;
@@ -34,6 +35,7 @@ describe('ConnectorRegistry', () => {
   let cmdbuildConnector: MockConnector;
   let fakeConnector: MockConnector;
   let passworkConnector: MockConnector;
+  let consultantPlusConnector: MockConnector;
 
   beforeEach(async () => {
     prisma = {
@@ -71,6 +73,12 @@ describe('ConnectorRegistry', () => {
       testConnection: jest.fn(),
       getCapabilities: jest.fn(),
     };
+    consultantPlusConnector = {
+      name: 'consultant-plus',
+      execute: jest.fn(),
+      testConnection: jest.fn(),
+      getCapabilities: jest.fn(),
+    };
     const jsonHelper = {
       fromJson: jest.fn((v: unknown) =>
         typeof v === 'string' ? (JSON.parse(v) as Record<string, unknown>) : v,
@@ -86,7 +94,7 @@ describe('ConnectorRegistry', () => {
           useValue: {
             get: jest.fn((key: string) => {
               if (key === 'STATIC_CONNECTOR_ALLOWLIST') {
-                return 'fake,zabbix,passwork';
+                return 'fake,zabbix,passwork,consultant-plus';
               }
               if (key === 'TARGET_SYSTEM_REGISTRY_REFRESH_SECONDS') {
                 return 0;
@@ -106,6 +114,10 @@ describe('ConnectorRegistry', () => {
         { provide: CmdbuildConnectorService, useValue: cmdbuildConnector },
         { provide: FakeConnectorService, useValue: fakeConnector },
         { provide: PassworkConnectorService, useValue: passworkConnector },
+        {
+          provide: ConsultantPlusConnectorService,
+          useValue: consultantPlusConnector,
+        },
       ],
     }).compile();
 
@@ -127,6 +139,7 @@ describe('ConnectorRegistry', () => {
       expect(registry.get('zabbix')).toBeDefined();
       expect(registry.get('fake')).toBeDefined();
       expect(registry.get('passwork')).toBeDefined();
+      expect(registry.get('consultant-plus')).toBeDefined();
       expect(registry.get('z1')).toBeDefined();
     });
 
@@ -198,6 +211,43 @@ describe('ConnectorRegistry', () => {
         payload: {
           params: { id: 'u1' },
           config: { baseUrl: 'https://passwork.local', accessToken: 'secret' },
+        },
+      });
+    });
+
+    it('should register ConsultantPlus dynamic target systems', async () => {
+      prisma.targetSystem.findMany.mockResolvedValue([
+        {
+          id: '1',
+          name: 'consultant-test',
+          type: 'consultant-plus',
+          enabled: true,
+          config: { baseUrl: 'https://login.consultant.ru' },
+        },
+      ]);
+      consultantPlusConnector.execute.mockResolvedValue({
+        success: false,
+        error: 'Unsupported ConsultantPlus operation: user.create',
+      });
+
+      await registry.reload();
+      const proxy = registry.get('consultant-test');
+      const result = await proxy?.execute({
+        operation: 'user.create',
+        targetSystem: 'consultant-test',
+        payload: { data: { username: 'u1' } },
+      });
+
+      expect(result).toEqual({
+        success: false,
+        error: 'Unsupported ConsultantPlus operation: user.create',
+      });
+      expect(consultantPlusConnector.execute).toHaveBeenCalledWith({
+        operation: 'user.create',
+        targetSystem: 'consultant-test',
+        payload: {
+          data: { username: 'u1' },
+          config: { baseUrl: 'https://login.consultant.ru' },
         },
       });
     });

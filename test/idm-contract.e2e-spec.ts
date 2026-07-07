@@ -8,10 +8,19 @@ import {
 import type { WebhookResponse } from '../src/inbound/webhooks/webhook.controller';
 
 const originalMockIdmEnabled = process.env['MOCK_IDM_ENABLED'];
+const originalMockIdmMiddlewareUrl = process.env['MOCK_IDM_MIDDLEWARE_URL'];
 process.env['MOCK_IDM_ENABLED'] = 'true';
 
 const { AppModule } =
   jest.requireActual<typeof import('../src/app.module')>('../src/app.module');
+
+function setMockIdmMiddlewareUrl(app: INestApplication): void {
+  const address = app.getHttpServer().address();
+  if (!address || typeof address === 'string') {
+    throw new Error('Test app must listen on a TCP port');
+  }
+  process.env['MOCK_IDM_MIDDLEWARE_URL'] = `http://127.0.0.1:${address.port}`;
+}
 
 describe('IDM Contract (e2e)', () => {
   let app: INestApplication;
@@ -25,7 +34,8 @@ describe('IDM Contract (e2e)', () => {
     app.useGlobalPipes(
       new ValidationPipe({ transform: true, whitelist: true }),
     );
-    await app.init();
+    await app.listen(0, '127.0.0.1');
+    setMockIdmMiddlewareUrl(app);
   });
 
   afterAll(async () => {
@@ -34,6 +44,11 @@ describe('IDM Contract (e2e)', () => {
       delete process.env['MOCK_IDM_ENABLED'];
     } else {
       process.env['MOCK_IDM_ENABLED'] = originalMockIdmEnabled;
+    }
+    if (originalMockIdmMiddlewareUrl === undefined) {
+      delete process.env['MOCK_IDM_MIDDLEWARE_URL'];
+    } else {
+      process.env['MOCK_IDM_MIDDLEWARE_URL'] = originalMockIdmMiddlewareUrl;
     }
   });
 

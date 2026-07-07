@@ -65,11 +65,12 @@ export class ProcessingService {
     private readonly metrics: MetricsService,
   ) {}
 
-  async process(dto: ProcessingPayload): Promise<void> {
+  async process(dto: ProcessingPayload): Promise<ConnectorResult> {
     try {
-      await this.executeWithRetry(dto);
+      const result = await this.executeWithRetry(dto);
       this.logger.log(`Processing succeeded for event ${dto.eventId}`);
       this.metrics.recordEvent('success', dto.targetSystem);
+      return result;
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : String(error);
       this.logger.error(`Processing failed for event ${dto.eventId}: ${msg}`);
@@ -113,7 +114,9 @@ export class ProcessingService {
     }
   }
 
-  private async executeWithRetry(dto: ProcessingPayload): Promise<void> {
+  private async executeWithRetry(
+    dto: ProcessingPayload,
+  ): Promise<ConnectorResult> {
     const connector = this.registry.get(dto.targetSystem);
     if (!connector) {
       this.logger.error(
@@ -136,6 +139,7 @@ export class ProcessingService {
       this.metrics.recordConnectorError(dto.targetSystem, dto.operation);
       throw new Error(result.error ?? 'Connector returned failure');
     }
+    return result;
   }
 
   /**

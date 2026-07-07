@@ -108,7 +108,9 @@ export class AvanpostWebhookDto {
 /**
  * Webhook response shape.
  *
- * For write operations only `received` and `processed` are returned.
+ * Write operations usually return only `received` and `processed`.
+ * Connectors may include safe operational metadata in `data`, for example
+ * ConsultantPlus password-reset delivery status without a password value.
  * For read/test operations (`user.get`, `user.search`, `system.test`,
  * `schema.get`, `sync.*`) the connector result is included in `data`.
  */

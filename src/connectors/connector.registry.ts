@@ -16,6 +16,7 @@ import { ZabbixConnectorService } from './implementations/zabbix-connector/zabbi
 import { CmdbuildConnectorService } from './implementations/cmdbuild-connector/cmdbuild-connector.service';
 import { FakeConnectorService } from './implementations/fake-connector/fake-connector.service';
 import { PassworkConnectorService } from './implementations/passwork-connector/passwork-connector.service';
+import { ConsultantPlusConnectorService } from './implementations/consultant-plus-connector/consultant-plus-connector.service';
 import { PrismaService } from '../database/prisma.service';
 import { JsonHelper } from '../database/json.helper';
 
@@ -103,6 +104,7 @@ export class ConnectorRegistry implements OnModuleInit, OnModuleDestroy {
     private readonly cmdbuildConnector: CmdbuildConnectorService,
     private readonly fakeConnector: FakeConnectorService,
     private readonly passworkConnector: PassworkConnectorService,
+    private readonly consultantPlusConnector: ConsultantPlusConnectorService,
   ) {
     // Register static blueprints at startup.
     this.registerStatic(this.restConnector);
@@ -111,6 +113,7 @@ export class ConnectorRegistry implements OnModuleInit, OnModuleDestroy {
     this.registerStatic(this.cmdbuildConnector);
     this.registerStatic(this.fakeConnector);
     this.registerStatic(this.passworkConnector);
+    this.registerStatic(this.consultantPlusConnector);
   }
 
   /** Load dynamic proxies from DB on application startup. */

@@ -8,7 +8,10 @@ DB_FLAVOR="${1:-yugabyte}"
 CURRENT_PROVIDER=""
 
 if [ -f node_modules/.prisma/client/schema.prisma ]; then
-  CURRENT_PROVIDER="$(awk -F'"' '/provider =/ { print $2; exit }' node_modules/.prisma/client/schema.prisma)"
+  CURRENT_PROVIDER="$(awk -F'"' '
+    /^[[:space:]]*datasource[[:space:]]+db[[:space:]]*\{/ { in_db = 1; next }
+    in_db && /^[[:space:]]*provider[[:space:]]*=/ { print $2; exit }
+  ' node_modules/.prisma/client/schema.prisma)"
 fi
 
 restore_prisma_client() {

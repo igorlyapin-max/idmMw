@@ -28,10 +28,10 @@ sequenceDiagram
     Registry-->>Processing: static connector or dynamic proxy
     Processing->>Connector: execute(operation, payload)
     alt success
-      Connector-->>Processing: {success:true}
-      Processing-->>Dispatcher: ok
-      Dispatcher-->>Webhook: ok
-      Webhook-->>IDM: {received:true, processed:true}
+      Connector-->>Processing: {success:true, data?}
+      Processing-->>Dispatcher: ConnectorResult
+      Dispatcher-->>Webhook: ConnectorResult
+      Webhook-->>IDM: {received:true, processed:true, data?}
     else retry exhausted / connector failure
       Processing->>DLQ: add(DlqItem)
       Processing-->>Dispatcher: error
@@ -40,6 +40,11 @@ sequenceDiagram
     end
   end
 ```
+
+For generic write operations `data` is omitted. A connector may expose only safe
+operational metadata; currently ConsultantPlus password reset/create can return
+`passwordKnown=false`, `passwordDelivery=email`, `managedLogin`, and `email`
+without a password value.
 
 ## Async write webhook
 
