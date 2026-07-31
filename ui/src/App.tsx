@@ -9,6 +9,7 @@ import {
   logout,
   type AuthSession,
 } from './api/client';
+import { APP_VERSION } from './version';
 import './App.css';
 
 function LoginScreen({
@@ -50,7 +51,10 @@ function LoginScreen({
   return (
     <main className="auth-page">
       <section className="auth-panel">
-        <h1>idmMw Admin</h1>
+        <h1 className="auth-title">
+          <span>idmMw Admin</span>
+          <span className="app-version">v{APP_VERSION}</span>
+        </h1>
         <div className="form-grid">
           {session.mode !== 'sso' && (
             <>
@@ -126,7 +130,10 @@ function App() {
     <BrowserRouter>
       <div className="app-frame">
         <header className="topbar">
-          <div className="brand">idmMw</div>
+          <div className="brand">
+            <span>idmMw</span>
+            <span className="app-version">v{APP_VERSION}</span>
+          </div>
           <nav className="nav-links">
             <Link to="/">DLQ</Link>
             <Link to="/target-systems">Target systems</Link>

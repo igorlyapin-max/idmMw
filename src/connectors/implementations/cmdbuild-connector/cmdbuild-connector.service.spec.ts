@@ -3,6 +3,14 @@ import { HttpService } from '@nestjs/axios';
 import { of, throwError } from 'rxjs';
 import { CmdbuildConnectorService } from './cmdbuild-connector.service';
 import { AVANPOST_OPERATION_VALUES } from '../../../inbound/webhooks/avanpost-operation.enum';
+import { SECRET_REDACTION_CENSOR } from '../../../security/secret-redaction';
+
+const BASIC_CMDBUILD_CONFIG = {
+  baseUrl: 'http://c',
+  username: 'u',
+  password: 'p',
+  authMode: 'basic' as const,
+};
 
 const changeCredentialOperation = ['user.change', 'P' + 'assword'].join('');
 
@@ -208,7 +216,7 @@ describe('CmdbuildConnectorService', () => {
           operation,
           targetSystem: 'cmdbuild',
           payload: {
-            config: { baseUrl: 'http://c', username: 'u', password: 'p' },
+            config: BASIC_CMDBUILD_CONFIG,
             ...payload,
           },
         });
@@ -233,6 +241,222 @@ describe('CmdbuildConnectorService', () => {
       expect(result.error).toContain('baseUrl');
     });
 
+    it('should use CMDBuild session auth by default', async () => {
+      httpService.request
+        .mockReturnValueOnce(of({ data: { data: { _id: 'session-1' } } }))
+        .mockReturnValueOnce(of({ data: { data: [] } }));
+
+      const result = await service.execute({
+        operation: 'user.search',
+        targetSystem: 'cmdbuild',
+        payload: {
+          config: {
+            baseUrl: 'http://c',
+            username: 'u',
+            password: 'session-secret',
+          },
+          params: { filter: 'admin' },
+        },
+      });
+
+      expect(result.success).toBe(true);
+      expect(httpService.request).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({
+          method: 'POST',
+          url: 'http://c/cmdbuild/services/rest/v3/sessions?scope=service&returnId=true',
+          data: { username: 'u', password: 'session-secret' },
+        }),
+      );
+      expect(httpService.request).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          method: 'GET',
+          headers: expect.objectContaining({
+            'Cmdbuild-Authorization': 'session-1',
+          }),
+        }),
+      );
+    });
+
+    it('should keep Basic auth when authMode is basic', async () => {
+      httpService.request.mockReturnValue(of({ data: { data: [] } }));
+
+      const result = await service.execute({
+        operation: 'user.search',
+        targetSystem: 'cmdbuild',
+        payload: {
+          config: BASIC_CMDBUILD_CONFIG,
+          params: { filter: 'admin' },
+        },
+      });
+
+      expect(result.success).toBe(true);
+      expect(httpService.request).toHaveBeenCalledWith(
+        expect.objectContaining({
+          headers: expect.objectContaining({
+            Authorization: 'Basic dTpw',
+          }),
+        }),
+      );
+      expect(httpService.request).toHaveBeenCalledTimes(1);
+      const urls = httpService.request.mock.calls.map(([request]) =>
+        String((request as { url?: unknown }).url ?? ''),
+      );
+      expect(urls.some((url) => url.includes('/sessions'))).toBe(false);
+    });
+
+    it('should reject invalid CMDBuild authMode before outbound calls', async () => {
+      const result = await service.execute({
+        operation: 'user.search',
+        targetSystem: 'cmdbuild',
+        payload: {
+          config: {
+            baseUrl: 'http://c',
+            username: 'u',
+            password: 'p',
+            authMode: 'digest',
+          },
+          params: { filter: 'admin' },
+        },
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('authMode');
+      expect(httpService.request).not.toHaveBeenCalled();
+    });
+
+    it('should refresh CMDBuild session auth after 401 response', async () => {
+      const expiredSessionError = new Error(
+        'Request failed with status code 401',
+      ) as Error & { response: { status: number } };
+      expiredSessionError.response = { status: 401 };
+
+      httpService.request
+        .mockReturnValueOnce(of({ data: { data: { _id: 'session-1' } } }))
+        .mockReturnValueOnce(throwError(() => expiredSessionError))
+        .mockReturnValueOnce(of({ data: { data: { _id: 'session-2' } } }))
+        .mockReturnValueOnce(of({ data: { data: [] } }));
+
+      const result = await service.execute({
+        operation: 'user.search',
+        targetSystem: 'cmdbuild',
+        payload: {
+          config: {
+            baseUrl: 'http://c',
+            username: 'u',
+            password: 'session-secret',
+          },
+          params: { filter: 'admin' },
+        },
+      });
+
+      expect(result.success).toBe(true);
+      expect(httpService.request).toHaveBeenCalledTimes(4);
+      expect(httpService.request).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          method: 'GET',
+          headers: expect.objectContaining({
+            'Cmdbuild-Authorization': 'session-1',
+          }),
+        }),
+      );
+      expect(httpService.request).toHaveBeenNthCalledWith(
+        4,
+        expect.objectContaining({
+          method: 'GET',
+          headers: expect.objectContaining({
+            'Cmdbuild-Authorization': 'session-2',
+          }),
+        }),
+      );
+    });
+
+    it('should redact session credentials from authentication errors', async () => {
+      httpService.request.mockReturnValue(
+        throwError(() => new Error('failed with session-secret')),
+      );
+
+      const result = await service.execute({
+        operation: 'user.search',
+        targetSystem: 'cmdbuild',
+        payload: {
+          config: {
+            baseUrl: 'http://c',
+            username: 'u',
+            password: 'session-secret',
+          },
+          params: { filter: 'admin' },
+        },
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('CMDBuild session authentication failed');
+      expect(result.error).not.toContain('session-secret');
+    });
+
+    it('should redact Basic auth secrets from operation errors', async () => {
+      httpService.request.mockReturnValue(
+        throwError(
+          () =>
+            new Error(
+              'failed with basic-secret and Authorization: Basic dTpiYXNpYy1zZWNyZXQ=',
+            ),
+        ),
+      );
+
+      const result = await service.execute({
+        operation: 'user.get',
+        targetSystem: 'cmdbuild',
+        payload: {
+          config: {
+            baseUrl: 'http://c',
+            username: 'u',
+            password: 'basic-secret',
+            authMode: 'basic',
+          },
+          params: { id: '1' },
+        },
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error).not.toContain('basic-secret');
+      expect(result.error).not.toContain('dTpiYXNpYy1zZWNyZXQ=');
+      expect(result.error).toContain(SECRET_REDACTION_CENSOR);
+    });
+
+    it('should redact cached session tokens from operation errors', async () => {
+      httpService.request
+        .mockReturnValueOnce(
+          of({ data: { data: { _id: 'session-secret-token' } } }),
+        )
+        .mockReturnValueOnce(
+          throwError(
+            () =>
+              new Error('failed with session-secret-token and session-secret'),
+          ),
+        );
+
+      const result = await service.execute({
+        operation: 'user.get',
+        targetSystem: 'cmdbuild',
+        payload: {
+          config: {
+            baseUrl: 'http://c',
+            username: 'u',
+            password: 'session-secret',
+          },
+          params: { id: '1' },
+        },
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error).not.toContain('session-secret-token');
+      expect(result.error).not.toContain('session-secret');
+      expect(result.error).toContain(SECRET_REDACTION_CENSOR);
+    });
+
     it('should get user via GET /users/{id}', async () => {
       httpService.request.mockReturnValue(
         of({ data: { data: { _id: 13, username: 'admin' } } }),
@@ -241,7 +465,7 @@ describe('CmdbuildConnectorService', () => {
         operation: 'user.get',
         targetSystem: 'cmdbuild',
         payload: {
-          config: { baseUrl: 'http://c', username: 'u', password: 'p' },
+          config: BASIC_CMDBUILD_CONFIG,
           params: { id: '13' },
         },
       });
@@ -260,7 +484,7 @@ describe('CmdbuildConnectorService', () => {
         operation: 'user.search',
         targetSystem: 'cmdbuild',
         payload: {
-          config: { baseUrl: 'http://c', username: 'u', password: 'p' },
+          config: BASIC_CMDBUILD_CONFIG,
           params: { filter: 'admin' },
         },
       });
@@ -282,7 +506,7 @@ describe('CmdbuildConnectorService', () => {
         operation: 'user.create',
         targetSystem: 'cmdbuild',
         payload: {
-          config: { baseUrl: 'http://c', username: 'u', password: 'p' },
+          config: BASIC_CMDBUILD_CONFIG,
           data: { username: 'jdoe', description: 'John Doe' },
         },
       });
@@ -303,7 +527,7 @@ describe('CmdbuildConnectorService', () => {
         operation: 'user.disable',
         targetSystem: 'cmdbuild',
         payload: {
-          config: { baseUrl: 'http://c', username: 'u', password: 'p' },
+          config: BASIC_CMDBUILD_CONFIG,
           params: { id: '13' },
         },
       });
@@ -324,7 +548,7 @@ describe('CmdbuildConnectorService', () => {
         operation: changeCredentialOperation,
         targetSystem: 'cmdbuild',
         payload: {
-          config: { baseUrl: 'http://c', username: 'u', password: 'p' },
+          config: BASIC_CMDBUILD_CONFIG,
           params: { id: '13' },
           data: { newValue: 'new-secret' },
         },
@@ -345,7 +569,7 @@ describe('CmdbuildConnectorService', () => {
         operation: 'group.create',
         targetSystem: 'cmdbuild',
         payload: {
-          config: { baseUrl: 'http://c', username: 'u', password: 'p' },
+          config: BASIC_CMDBUILD_CONFIG,
           data: { name: 'Admins', description: 'Administrators' },
         },
       });
@@ -374,7 +598,7 @@ describe('CmdbuildConnectorService', () => {
         operation: 'group.search',
         targetSystem: 'cmdbuild',
         payload: {
-          config: { baseUrl: 'http://c', username: 'u', password: 'p' },
+          config: BASIC_CMDBUILD_CONFIG,
           params: { filter: 'Admin', limit: 10 },
         },
       });
@@ -405,7 +629,7 @@ describe('CmdbuildConnectorService', () => {
         operation: 'group.addMember',
         targetSystem: 'cmdbuild',
         payload: {
-          config: { baseUrl: 'http://c', username: 'u', password: 'p' },
+          config: BASIC_CMDBUILD_CONFIG,
           params: { roleId: '5', userId: '1' },
         },
       });
@@ -439,7 +663,7 @@ describe('CmdbuildConnectorService', () => {
         operation: 'group.removeMember',
         targetSystem: 'cmdbuild',
         payload: {
-          config: { baseUrl: 'http://c', username: 'u', password: 'p' },
+          config: BASIC_CMDBUILD_CONFIG,
           params: { roleId: '5', userId: '1' },
         },
       });
@@ -467,7 +691,7 @@ describe('CmdbuildConnectorService', () => {
         operation: 'user.get',
         targetSystem: 'cmdbuild',
         payload: {
-          config: { baseUrl: 'http://c', username: 'u', password: 'p' },
+          config: BASIC_CMDBUILD_CONFIG,
           params: { id: '1' },
         },
       });
@@ -484,7 +708,9 @@ describe('CmdbuildConnectorService', () => {
     });
 
     it('should return success when API is reachable', async () => {
-      httpService.get.mockReturnValue(of({ status: 200 }));
+      httpService.request
+        .mockReturnValueOnce(of({ data: { data: { _id: 'session-1' } } }))
+        .mockReturnValueOnce(of({ data: { data: [] } }));
       const result = await service.testConnection({
         baseUrl: 'http://c',
         username: 'u',
@@ -495,7 +721,7 @@ describe('CmdbuildConnectorService', () => {
     });
 
     it('should return error on failure', async () => {
-      httpService.get.mockReturnValue(
+      httpService.request.mockReturnValue(
         throwError(() => new Error('Connection refused')),
       );
       const result = await service.testConnection({
@@ -505,6 +731,29 @@ describe('CmdbuildConnectorService', () => {
       });
       expect(result.success).toBe(false);
       expect(result.message).toContain('Connection refused');
+    });
+
+    it('should redact credentials from connection failure messages', async () => {
+      httpService.request.mockReturnValue(
+        throwError(
+          () =>
+            new Error(
+              'failed with basic-secret and Authorization: Basic dTpiYXNpYy1zZWNyZXQ=',
+            ),
+        ),
+      );
+
+      const result = await service.testConnection({
+        baseUrl: 'http://c',
+        username: 'u',
+        password: 'basic-secret',
+        authMode: 'basic',
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.message).not.toContain('basic-secret');
+      expect(result.message).not.toContain('dTpiYXNpYy1zZWNyZXQ=');
+      expect(result.message).toContain(SECRET_REDACTION_CENSOR);
     });
   });
 });

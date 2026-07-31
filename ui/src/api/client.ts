@@ -81,9 +81,29 @@ export interface AuthSession {
   };
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function parseAuthSession(value: unknown): AuthSession {
+  if (!isRecord(value)) {
+    throw new Error('Invalid auth session response');
+  }
+
+  if (
+    typeof value['authEnabled'] !== 'boolean' ||
+    typeof value['authenticated'] !== 'boolean' ||
+    typeof value['mode'] !== 'string'
+  ) {
+    throw new Error('Invalid auth session response');
+  }
+
+  return value as unknown as AuthSession;
+}
+
 export async function fetchAuthSession(): Promise<AuthSession> {
   const res = await apiClient.get('/auth/session');
-  const session = res.data as AuthSession;
+  const session = parseAuthSession(res.data);
   setCsrfToken(session.csrfToken ?? '');
   return session;
 }
@@ -93,14 +113,14 @@ export async function loginLocal(
   password: string,
 ): Promise<AuthSession> {
   const res = await apiClient.post('/auth/login', { username, password });
-  const session = res.data as AuthSession;
+  const session = parseAuthSession(res.data);
   setCsrfToken(session.csrfToken ?? '');
   return session;
 }
 
 export async function loginSso(): Promise<AuthSession> {
   const res = await apiClient.post('/auth/sso-login');
-  const session = res.data as AuthSession;
+  const session = parseAuthSession(res.data);
   setCsrfToken(session.csrfToken ?? '');
   return session;
 }

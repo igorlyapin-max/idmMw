@@ -16,6 +16,8 @@ interface ConfigField {
   help?: string;
   inputType?: 'password' | 'text';
   placeholder?: string;
+  defaultValue?: string;
+  options?: Array<{ value: string; label: string }>;
 }
 
 interface RetryPolicyForm {
@@ -115,7 +117,17 @@ const TYPE_FIELDS: Record<string, ConfigField[]> = {
       name: 'password',
       label: 'Password',
       inputType: 'password',
-      help: 'Basic authentication password for CMDBuild REST v3.',
+      help: 'CMDBuild credential used by the selected auth mode.',
+    },
+    {
+      name: 'authMode',
+      label: 'Auth mode',
+      defaultValue: 'session',
+      options: [
+        { value: 'session', label: 'session' },
+        { value: 'basic', label: 'basic' },
+      ],
+      help: 'Defaults to session. Basic is intended for read-only stands that do not allow service sessions.',
     },
     {
       name: 'defaultUserGroupId',
@@ -212,6 +224,13 @@ function buildConfig(form: TargetSystemForm): Record<string, unknown> {
   TYPE_FIELDS[form.type]?.forEach((field) => {
     const value = form.configValues[field.name];
     if (isSecretConfigKey(field.name) && isMaskedSecretPlaceholder(value)) {
+      return;
+    }
+    if (
+      field.options &&
+      value !== undefined &&
+      !field.options.some((option) => option.value === value)
+    ) {
       return;
     }
     if (value !== undefined && value !== '') {
@@ -496,20 +515,43 @@ export function TargetSystemsPage() {
             {currentFields.map((field) => (
               <label key={field.name}>
                 {field.label}
-                <input
-                  type={field.inputType ?? 'text'}
-                  placeholder={field.placeholder}
-                  value={form.configValues[field.name] ?? ''}
-                  onChange={(e) =>
-                    setForm({
-                      ...form,
-                      configValues: {
-                        ...form.configValues,
-                        [field.name]: e.target.value,
-                      },
-                    })
-                  }
-                />
+                {field.options ? (
+                  <select
+                    value={
+                      form.configValues[field.name] ?? field.defaultValue ?? ''
+                    }
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        configValues: {
+                          ...form.configValues,
+                          [field.name]: e.target.value,
+                        },
+                      })
+                    }
+                  >
+                    {field.options.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    type={field.inputType ?? 'text'}
+                    placeholder={field.placeholder}
+                    value={form.configValues[field.name] ?? ''}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        configValues: {
+                          ...form.configValues,
+                          [field.name]: e.target.value,
+                        },
+                      })
+                    }
+                  />
+                )}
                 {field.help && <span className="field-help">{field.help}</span>}
               </label>
             ))}

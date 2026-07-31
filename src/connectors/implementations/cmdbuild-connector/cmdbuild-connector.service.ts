@@ -1,6 +1,7 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { lastValueFrom } from 'rxjs';
+import { createHash } from 'crypto';
 import {
   Connector,
   ConnectorCapabilities,
@@ -12,6 +13,9 @@ import {
   TlsConnectionConfig,
   TlsOptionsFactory,
 } from '../../../security/tls-options.factory';
+import { SECRET_REDACTION_CENSOR } from '../../../security/secret-redaction';
+
+export type CmdbuildAuthMode = 'session' | 'basic';
 
 export interface CmdbuildConfig {
   baseUrl: string;
@@ -19,6 +23,7 @@ export interface CmdbuildConfig {
   password: string;
   apiPath?: string;
   defaultUserGroupId?: string | number;
+  authMode?: CmdbuildAuthMode;
   tls?: TlsConnectionConfig;
 }
 
@@ -49,10 +54,13 @@ const CMDBUILD_PARTIAL_OPERATIONS: Record<string, string> = {
     'Uses /users without a CMDBuild change cursor or high-watermark.',
 };
 
+const MIN_LITERAL_SECRET_LENGTH = 4;
+
 @Injectable()
 export class CmdbuildConnectorService implements Connector {
   readonly name = 'cmdbuild';
   private readonly logger = new Logger(CmdbuildConnectorService.name);
+  private readonly sessionTokens = new Map<string, string>();
 
   constructor(
     private readonly httpService: HttpService,
@@ -125,7 +133,7 @@ export class CmdbuildConnectorService implements Connector {
       this.logger.log(`CMDBuild ${operation} succeeded`);
       return { success: true, data: response };
     } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = this.safeErrorMessage(error, config);
       this.logger.error(`CMDBuild operation failed: ${msg}`);
       return { success: false, error: msg };
     }
@@ -135,11 +143,161 @@ export class CmdbuildConnectorService implements Connector {
     return config.apiPath ?? '/cmdbuild/services/rest/v3';
   }
 
-  private getAuthHeader(config: CmdbuildConfig): string {
+  private getBasicAuthHeader(config: CmdbuildConfig): string {
     const creds = Buffer.from(`${config.username}:${config.password}`).toString(
       'base64',
     );
     return `Basic ${creds}`;
+  }
+
+  private normalizeAuthMode(config: CmdbuildConfig): CmdbuildAuthMode {
+    const raw = config.authMode as unknown;
+    if (raw === undefined || raw === null) {
+      return 'session';
+    }
+    if (typeof raw !== 'string') {
+      throw new Error('Invalid CMDBuild authMode: expected session or basic');
+    }
+    const normalized = raw.trim().toLowerCase();
+    if (!normalized || normalized === 'session') {
+      return 'session';
+    }
+    if (normalized === 'basic') {
+      return 'basic';
+    }
+    throw new Error('Invalid CMDBuild authMode: expected session or basic');
+  }
+
+  private async getAuthHeaders(
+    config: CmdbuildConfig,
+    authMode = this.normalizeAuthMode(config),
+  ): Promise<Record<string, string>> {
+    if (authMode === 'basic') {
+      return { Authorization: this.getBasicAuthHeader(config) };
+    }
+
+    return { 'Cmdbuild-Authorization': await this.getSessionId(config) };
+  }
+
+  private sessionCacheKey(config: CmdbuildConfig): string {
+    const passwordFingerprint = createHash('sha256')
+      .update(config.password ?? '')
+      .digest('hex');
+    return [
+      config.baseUrl.replace(/\/+$/, ''),
+      this.getApiPath(config),
+      config.username,
+      passwordFingerprint,
+    ].join('|');
+  }
+
+  private async getSessionId(config: CmdbuildConfig): Promise<string> {
+    const cacheKey = this.sessionCacheKey(config);
+    const cached = this.sessionTokens.get(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
+    const apiPath = this.getApiPath(config);
+    const url = `${config.baseUrl}${apiPath}/sessions?scope=service&returnId=true`;
+
+    try {
+      const response = await lastValueFrom(
+        this.httpService.request({
+          url,
+          method: 'POST',
+          data: { username: config.username, password: config.password },
+          headers: { 'Content-Type': 'application/json' },
+          timeout: 30000,
+          ...(this.tlsOptions?.axiosConfig(
+            config.baseUrl,
+            config.tls,
+            'CMDBuild',
+          ) ?? {}),
+        }),
+      );
+      const sessionId = this.extractSessionId(response.data);
+      if (!sessionId) {
+        throw new Error('CMDBuild session response did not include _id');
+      }
+      this.sessionTokens.set(cacheKey, sessionId);
+      return sessionId;
+    } catch (error: unknown) {
+      throw new Error(
+        `CMDBuild session authentication failed: ${this.safeErrorMessage(
+          error,
+          config,
+        )}`,
+      );
+    }
+  }
+
+  private extractSessionId(value: unknown): string | undefined {
+    if (value === null || typeof value !== 'object') {
+      return undefined;
+    }
+    const topLevel = value as Record<string, unknown>;
+    const topLevelId = topLevel['_id'];
+    if (typeof topLevelId === 'string' && topLevelId.trim()) {
+      return topLevelId;
+    }
+    const data = topLevel['data'];
+    if (data === null || typeof data !== 'object') {
+      return undefined;
+    }
+    const nestedId = (data as Record<string, unknown>)['_id'];
+    return typeof nestedId === 'string' && nestedId.trim()
+      ? nestedId
+      : undefined;
+  }
+
+  private getErrorMessage(error: unknown): string {
+    if (error instanceof Error) {
+      return error.message;
+    }
+    if (
+      error !== null &&
+      typeof error === 'object' &&
+      typeof (error as { message?: unknown }).message === 'string'
+    ) {
+      return (error as { message: string }).message;
+    }
+    return String(error);
+  }
+
+  private safeErrorMessage(error: unknown, config?: CmdbuildConfig): string {
+    let msg = this.getErrorMessage(error);
+    const basicHeader =
+      config?.username !== undefined && config.password !== undefined
+        ? this.getBasicAuthHeader(config)
+        : undefined;
+    const secrets = [
+      config?.password,
+      basicHeader,
+      ...Array.from(this.sessionTokens.values()),
+    ]
+      .filter(
+        (secret): secret is string =>
+          typeof secret === 'string' &&
+          secret.length >= MIN_LITERAL_SECRET_LENGTH,
+      )
+      .sort((left, right) => right.length - left.length);
+    for (const secret of secrets) {
+      msg = msg.split(secret).join(SECRET_REDACTION_CENSOR);
+    }
+    return msg
+      .replace(
+        /\bBasic\s+[A-Za-z0-9+/=._-]+/g,
+        `Basic ${SECRET_REDACTION_CENSOR}`,
+      )
+      .replace(
+        /((?:Authorization|Cmdbuild-Authorization)\s*[:=]\s*)(?:Basic\s+)?[^,\s}]+/gi,
+        `$1${SECRET_REDACTION_CENSOR}`,
+      )
+      .replace(
+        /((?:password|passwd|pwd|token|secret)\s*[:=]\s*)[^,\s}]+/gi,
+        `$1${SECRET_REDACTION_CENSOR}`,
+      );
   }
 
   private appendQuery(path: string, query: Record<string, unknown>): string {
@@ -195,29 +353,52 @@ export class CmdbuildConnectorService implements Connector {
     method: string,
     path: string,
     body?: unknown,
+    retrySessionAuth = true,
   ): Promise<unknown> {
+    const authMode = this.normalizeAuthMode(config);
     const apiPath = this.getApiPath(config);
     const url = `${config.baseUrl}${apiPath}${path}`;
-    const auth = this.getAuthHeader(config);
 
-    const response = await lastValueFrom(
-      this.httpService.request({
-        url,
-        method,
-        data: body,
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: auth,
-        },
-        timeout: 30000,
-        ...(this.tlsOptions?.axiosConfig(
-          config.baseUrl,
-          config.tls,
-          'CMDBuild',
-        ) ?? {}),
-      }),
-    );
-    return response.data;
+    try {
+      const authHeaders = await this.getAuthHeaders(config, authMode);
+      const response = await lastValueFrom(
+        this.httpService.request({
+          url,
+          method,
+          data: body,
+          headers: {
+            'Content-Type': 'application/json',
+            ...authHeaders,
+          },
+          timeout: 30000,
+          ...(this.tlsOptions?.axiosConfig(
+            config.baseUrl,
+            config.tls,
+            'CMDBuild',
+          ) ?? {}),
+        }),
+      );
+      return response.data;
+    } catch (error: unknown) {
+      if (
+        retrySessionAuth &&
+        authMode === 'session' &&
+        this.isSessionAuthFailure(error)
+      ) {
+        this.sessionTokens.delete(this.sessionCacheKey(config));
+        return this.call(config, method, path, body, false);
+      }
+      throw error;
+    }
+  }
+
+  private isSessionAuthFailure(error: unknown): boolean {
+    if (error === null || typeof error !== 'object') {
+      return false;
+    }
+    const status = (error as { response?: { status?: unknown } }).response
+      ?.status;
+    return status === 401 || status === 403;
   }
 
   private async getEntity(
@@ -356,7 +537,11 @@ export class CmdbuildConnectorService implements Connector {
 
       case 'user.update':
       case 'user.addAttributes':
-        return this.putMerged(config, `/users/${this.pathSegment(id, 'id')}`, data);
+        return this.putMerged(
+          config,
+          `/users/${this.pathSegment(id, 'id')}`,
+          data,
+        );
 
       case 'user.removeAttributes':
         return this.putMerged(
@@ -392,7 +577,11 @@ export class CmdbuildConnectorService implements Connector {
       }
 
       case 'group.update':
-        return this.putMerged(config, `/roles/${this.pathSegment(id, 'id')}`, data);
+        return this.putMerged(
+          config,
+          `/roles/${this.pathSegment(id, 'id')}`,
+          data,
+        );
 
       case 'group.delete':
         return this.putMerged(config, `/roles/${this.pathSegment(id, 'id')}`, {
@@ -602,18 +791,10 @@ export class CmdbuildConnectorService implements Connector {
     }
 
     try {
-      const apiPath = this.getApiPath(cfg);
-      await lastValueFrom(
-        this.httpService.get(`${cfg.baseUrl}${apiPath}/classes`, {
-          headers: { Authorization: this.getAuthHeader(cfg) },
-          timeout: 30000,
-          ...(this.tlsOptions?.axiosConfig(cfg.baseUrl, cfg.tls, 'CMDBuild') ??
-            {}),
-        }),
-      );
+      await this.call(cfg, 'GET', '/classes');
       return { success: true, message: 'CMDBuild API reachable' };
     } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = this.safeErrorMessage(error, cfg);
       return { success: false, message: `CMDBuild connection failed: ${msg}` };
     }
   }
