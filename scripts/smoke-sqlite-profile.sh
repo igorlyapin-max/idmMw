@@ -84,6 +84,7 @@ for _ in $(seq 1 40); do
 done
 
 curl -fsS "http://127.0.0.1:${RUNTIME_PORT}/health" | grep -q '"status":"ok"'
+curl -fsS "http://127.0.0.1:${RUNTIME_PORT}/about" | grep -q '"build"'
 curl -fsS "http://127.0.0.1:${RUNTIME_PORT}/metrics" | grep -q "idmmw_http_requests_total"
 
 echo "[7/7] Checking webhook, diagnostics, redaction and file sink"

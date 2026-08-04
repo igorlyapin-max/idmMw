@@ -5,6 +5,7 @@ stages:
   - test
   - frontend
   - profile
+  - image
   - smoke
 
 workflow:
@@ -122,3 +123,46 @@ runtime:smoke:
   stage: smoke
   script:
     - npm run test:runtime-smoke
+
+container:verified:
+  image: docker:27-cli
+  services:
+    - docker:27-dind
+  stage: image
+  variables:
+    DOCKER_HOST: tcp://docker:2375
+    DOCKER_TLS_CERTDIR: ''
+  parallel:
+    matrix:
+      - IDMMW_IMAGE_PROFILE: dev-sqlite
+        IDMMW_IMAGE_TAG: dev-sqlite
+        IDMMW_VERIFY_RUNTIME: 'true'
+      - IDMMW_IMAGE_PROFILE: dev-postgres
+        IDMMW_IMAGE_TAG: dev-postgres
+        IDMMW_VERIFY_RUNTIME: 'false'
+      - IDMMW_IMAGE_PROFILE: ha-yugabyte
+        IDMMW_IMAGE_TAG: ha-yugabyte
+        IDMMW_VERIFY_RUNTIME: 'false'
+      - IDMMW_IMAGE_PROFILE: ha-cockroach
+        IDMMW_IMAGE_TAG: ha-cockroach
+        IDMMW_VERIFY_RUNTIME: 'false'
+  rules:
+    - if: '$CI_COMMIT_TAG'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+    - when: never
+  before_script:
+    - apk add --no-cache bash coreutils curl git nodejs npm
+    - docker version
+    - npm --version
+  script:
+    - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
+    - |
+      verify_runtime_args=""
+      if [ "$IDMMW_VERIFY_RUNTIME" != "true" ]; then
+        verify_runtime_args="--no-runtime"
+      fi
+      bash scripts/build-verified-image.sh \
+        --profile "$IDMMW_IMAGE_PROFILE" \
+        --image "$CI_REGISTRY_IMAGE:$IDMMW_IMAGE_TAG" \
+        $verify_runtime_args \
+        --push

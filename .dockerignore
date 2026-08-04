@@ -1,5 +1,6 @@
 .git
 .gitlab-ci.yml
+AGENTS.md
 .agents
 .codex
 .npm

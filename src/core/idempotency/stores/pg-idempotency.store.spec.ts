@@ -26,8 +26,8 @@ describe('PgIdempotencyStore', () => {
       },
     };
     const prisma = {
-      $transaction: jest.fn(async (fn: (value: typeof tx) => Promise<boolean>) =>
-        fn(tx),
+      $transaction: jest.fn(
+        async (fn: (value: typeof tx) => Promise<boolean>) => fn(tx),
       ),
     };
     const store = new PgIdempotencyStore(prisma as unknown as PrismaService);
@@ -49,8 +49,8 @@ describe('PgIdempotencyStore', () => {
       },
     };
     const prisma = {
-      $transaction: jest.fn(async (fn: (value: typeof tx) => Promise<boolean>) =>
-        fn(tx),
+      $transaction: jest.fn(
+        async (fn: (value: typeof tx) => Promise<boolean>) => fn(tx),
       ),
     };
     const store = new PgIdempotencyStore(prisma as unknown as PrismaService);

@@ -35,6 +35,8 @@
     "profile:validate": "bash scripts/validate-deployment-profile.sh",
     "profile:smoke:sqlite": "bash scripts/smoke-sqlite-profile.sh",
     "profile:validate:prod-ha": "bash scripts/validate-prod-ha-profile.sh",
+    "image:build:verified": "bash scripts/build-verified-image.sh",
+    "image:verify": "bash scripts/verify-image-provenance.sh",
     "db:migrate": "prisma migrate dev",
     "db:generate": "prisma generate",
     "db:generate:sqlite": "prisma generate --schema=prisma/schema.sqlite.prisma",

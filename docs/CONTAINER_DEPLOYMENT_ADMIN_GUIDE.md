@@ -5,12 +5,12 @@ containers with prebuilt images, `.env` files and secrets resolved through PAM.
 
 ## Delivery artifacts
 
-| Scenario              | Compose file                         | Env template                                | Image tag                         |
-| --------------------- | ------------------------------------ | ------------------------------------------- | --------------------------------- |
-| Default DEV, SQLite   | `deploy/docker-compose.dev-sqlite.yml`   | `deploy/profiles/dev-sqlite.env.example`    | `REPLACE_REGISTRY/idmmw:dev-sqlite` |
-| DEV APP + PostgreSQL  | `deploy/docker-compose.dev-postgres.yml` | `deploy/profiles/dev-postgres.env.example`  | `REPLACE_REGISTRY/idmmw:dev-postgres` |
-| HA, YugabyteDB YSQL   | `deploy/docker-compose.prod-ha.yml`      | `deploy/profiles/prod-ha-yugabyte.env.example` | `REPLACE_REGISTRY/idmmw:ha-yugabyte` |
-| HA, CockroachDB       | `deploy/docker-compose.prod-ha.yml`      | `deploy/profiles/prod-ha-cockroach.env.example` | `REPLACE_REGISTRY/idmmw:ha-cockroach` |
+| Scenario             | Compose file                             | Env template                                    | Image tag                             |
+| -------------------- | ---------------------------------------- | ----------------------------------------------- | ------------------------------------- |
+| Default DEV, SQLite  | `deploy/docker-compose.dev-sqlite.yml`   | `deploy/profiles/dev-sqlite.env.example`        | `REPLACE_REGISTRY/idmmw:dev-sqlite`   |
+| DEV APP + PostgreSQL | `deploy/docker-compose.dev-postgres.yml` | `deploy/profiles/dev-postgres.env.example`      | `REPLACE_REGISTRY/idmmw:dev-postgres` |
+| HA, YugabyteDB YSQL  | `deploy/docker-compose.prod-ha.yml`      | `deploy/profiles/prod-ha-yugabyte.env.example`  | `REPLACE_REGISTRY/idmmw:ha-yugabyte`  |
+| HA, CockroachDB      | `deploy/docker-compose.prod-ha.yml`      | `deploy/profiles/prod-ha-cockroach.env.example` | `REPLACE_REGISTRY/idmmw:ha-cockroach` |
 
 `deploy/docker-compose.sqlite-test.yml` and
 `deploy/profiles/sqlite-test.env.example` remain CI/disposable smoke artifacts,
@@ -20,27 +20,35 @@ not the administrator-facing default.
 
 Build images once in CI or on a controlled build host, then push them to the
 corporate registry. Runtime hosts should use `image:`, not `build:`.
+Use the verified helper for delivery images. It embeds root `VERSION`, full Git
+revision, clean-source state, OCI labels and the Admin UI runtime artifact
+checksum, then verifies those values against the built image. A raw local
+`docker build` is allowed only for development and is treated as
+`unverified-local`.
 
 ```bash
-docker build \
-  --build-arg PRISMA_SCHEMA=prisma/schema.sqlite.prisma \
-  -t REPLACE_REGISTRY/idmmw:dev-sqlite .
-docker push REPLACE_REGISTRY/idmmw:dev-sqlite
+bash scripts/build-verified-image.sh \
+  --profile dev-sqlite \
+  --image REPLACE_REGISTRY/idmmw:dev-sqlite \
+  --push
 
-docker build \
-  --build-arg PRISMA_SCHEMA=prisma/schema.prisma \
-  -t REPLACE_REGISTRY/idmmw:dev-postgres .
-docker push REPLACE_REGISTRY/idmmw:dev-postgres
+bash scripts/build-verified-image.sh \
+  --profile dev-postgres \
+  --image REPLACE_REGISTRY/idmmw:dev-postgres \
+  --no-runtime \
+  --push
 
-docker build \
-  --build-arg PRISMA_SCHEMA=prisma/schema.prisma \
-  -t REPLACE_REGISTRY/idmmw:ha-yugabyte .
-docker push REPLACE_REGISTRY/idmmw:ha-yugabyte
+bash scripts/build-verified-image.sh \
+  --profile ha-yugabyte \
+  --image REPLACE_REGISTRY/idmmw:ha-yugabyte \
+  --no-runtime \
+  --push
 
-docker build \
-  --build-arg PRISMA_SCHEMA=prisma/schema.cockroach.prisma \
-  -t REPLACE_REGISTRY/idmmw:ha-cockroach .
-docker push REPLACE_REGISTRY/idmmw:ha-cockroach
+bash scripts/build-verified-image.sh \
+  --profile ha-cockroach \
+  --image REPLACE_REGISTRY/idmmw:ha-cockroach \
+  --no-runtime \
+  --push
 ```
 
 The Prisma schema is selected at image build time. Do not reuse a SQLite image
@@ -85,6 +93,7 @@ Check the runtime:
 
 ```bash
 curl -fsS http://127.0.0.1:3010/health
+curl -fsS http://127.0.0.1:3010/about
 curl -fsS http://127.0.0.1:3010/metrics
 ```
 
@@ -127,6 +136,7 @@ Check:
 
 ```bash
 curl -fsS http://127.0.0.1:3010/health
+curl -fsS http://127.0.0.1:3010/about
 curl -fsS http://127.0.0.1:3010/metrics
 ```
 
@@ -220,16 +230,54 @@ injected by the platform and cannot be resolved through the same PAM resolver.
 - Production HA examples use `LOG_SINK=file`, `/app/logs/idmmw.log` and the
   `logging` compose profile sidecar as the second operational delivery route.
 
+## Verified image identity
+
+Before replacing a deployed image, record the configured image reference and
+the currently running container image id:
+
+```bash
+docker compose --env-file deploy/profiles/dev-sqlite.env \
+  -f deploy/docker-compose.dev-sqlite.yml images idmmw
+docker inspect --format '{{.Image}}' <running-idmmw-container>
+```
+
+After pulling a replacement image, recreate the container. `docker compose
+restart` keeps the old image id and is not a source freshness proof.
+
+```bash
+docker compose --env-file deploy/profiles/dev-sqlite.env \
+  -f deploy/docker-compose.dev-sqlite.yml pull idmmw
+docker compose --env-file deploy/profiles/dev-sqlite.env \
+  -f deploy/docker-compose.dev-sqlite.yml up -d --force-recreate idmmw
+```
+
+Confirm that `/about` and `/health` expose the same build identity as the image
+labels:
+
+```bash
+curl -fsS http://127.0.0.1:3010/about
+docker image inspect REPLACE_REGISTRY/idmmw:dev-sqlite \
+  --format '{{json .Config.Labels}}'
+```
+
+The fields `version`, `gitRevision`, `sourceClean`, `provenance` and
+`runtimeArtifactSha256` must match the release commit and image labels.
+`provenance=unverified-local`, version `0.0.0.0`, missing revision, or a
+different running image id blocks customer handoff. `docker compose --no-cache`
+does not rebuild image-only services and is not release evidence.
+
 ## Acceptance checklist
 
 - `docker compose config` succeeds for the selected compose/env pair.
 - DB init or migration one-shot completes successfully.
 - App container starts without restart loops.
 - `/health` returns public liveness success.
+- `/about` and `/health` expose verified build identity for the running image.
 - `/ready` returns dependency readiness for DB, Redis and Kafka on the internal
   route.
 - `/metrics` exposes Prometheus metrics on the internal route, or requires
   integration HMAC when `METRICS_PUBLIC_ENABLED=false`.
+- Running container image id matches the freshly pulled verified image id.
 - Admin UI is reachable when `ADMIN_UI_ENABLED=true`.
 - `/webhooks/avanpost` and `/idm/*` reject unsigned requests when
   `INTEGRATION_AUTH_ENABLED=true`.

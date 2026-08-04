@@ -81,6 +81,7 @@ for _ in $(seq 1 40); do
 done
 
 curl -fsS "http://127.0.0.1:${PORT}/health" >/dev/null
+curl -fsS "http://127.0.0.1:${PORT}/about" | grep -q '"build"'
 curl -fsS "http://127.0.0.1:${PORT}/metrics" | grep -q "idmmw_http_requests_total"
 
 echo "[6/6] Checking IDM webhook, diagnostics, redaction, and second log sink"

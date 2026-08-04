@@ -59,10 +59,10 @@ LOG_SINK=stdout
 Build/push the image:
 
 ```bash
-docker build \
-  --build-arg PRISMA_SCHEMA=prisma/schema.sqlite.prisma \
-  -t REPLACE_REGISTRY/idmmw:dev-sqlite .
-docker push REPLACE_REGISTRY/idmmw:dev-sqlite
+bash scripts/build-verified-image.sh \
+  --profile dev-sqlite \
+  --image REPLACE_REGISTRY/idmmw:dev-sqlite \
+  --push
 ```
 
 Run:
@@ -183,10 +183,11 @@ LOG_FILE_PATH=/app/logs/idmmw.log
 Build image:
 
 ```bash
-docker build \
-  --build-arg PRISMA_SCHEMA=prisma/schema.prisma \
-  -t REPLACE_REGISTRY/idmmw:ha-yugabyte .
-docker push REPLACE_REGISTRY/idmmw:ha-yugabyte
+bash scripts/build-verified-image.sh \
+  --profile ha-yugabyte \
+  --image REPLACE_REGISTRY/idmmw:ha-yugabyte \
+  --no-runtime \
+  --push
 ```
 
 Run one instance with compose template:
@@ -220,10 +221,11 @@ Profile files:
 Build image with Cockroach Prisma schema:
 
 ```bash
-docker build \
-  --build-arg PRISMA_SCHEMA=prisma/schema.cockroach.prisma \
-  -t REPLACE_REGISTRY/idmmw:ha-cockroach .
-docker push REPLACE_REGISTRY/idmmw:ha-cockroach
+bash scripts/build-verified-image.sh \
+  --profile ha-cockroach \
+  --image REPLACE_REGISTRY/idmmw:ha-cockroach \
+  --no-runtime \
+  --push
 ```
 
 Validate without live CockroachDB:

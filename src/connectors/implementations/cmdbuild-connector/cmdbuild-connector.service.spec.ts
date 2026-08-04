@@ -272,6 +272,7 @@ describe('CmdbuildConnectorService', () => {
         2,
         expect.objectContaining({
           method: 'GET',
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
           headers: expect.objectContaining({
             'Cmdbuild-Authorization': 'session-1',
           }),
@@ -294,15 +295,17 @@ describe('CmdbuildConnectorService', () => {
       expect(result.success).toBe(true);
       expect(httpService.request).toHaveBeenCalledWith(
         expect.objectContaining({
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
           headers: expect.objectContaining({
             Authorization: 'Basic dTpw',
           }),
         }),
       );
       expect(httpService.request).toHaveBeenCalledTimes(1);
-      const urls = httpService.request.mock.calls.map(([request]) =>
-        String((request as { url?: unknown }).url ?? ''),
-      );
+      const urls = httpService.request.mock.calls.map((call: unknown[]) => {
+        const request = call[0] as { url?: unknown };
+        return typeof request.url === 'string' ? request.url : '';
+      });
       expect(urls.some((url) => url.includes('/sessions'))).toBe(false);
     });
 
@@ -357,6 +360,7 @@ describe('CmdbuildConnectorService', () => {
         2,
         expect.objectContaining({
           method: 'GET',
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
           headers: expect.objectContaining({
             'Cmdbuild-Authorization': 'session-1',
           }),
@@ -366,6 +370,7 @@ describe('CmdbuildConnectorService', () => {
         4,
         expect.objectContaining({
           method: 'GET',
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
           headers: expect.objectContaining({
             'Cmdbuild-Authorization': 'session-2',
           }),

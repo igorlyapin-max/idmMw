@@ -88,7 +88,7 @@ export class DbConnectorService
       | DbConnectorKnexInput
       | undefined;
     const knexClient = dynamicConfig
-      ? await this.createDynamicKnex(dynamicConfig)
+      ? this.createDynamicKnex(dynamicConfig)
       : this.knex;
     const shouldDestroy = Boolean(dynamicConfig);
 
@@ -295,9 +295,7 @@ export class DbConnectorService
     };
   }
 
-  private async createDynamicKnex(
-    config: DbConnectorKnexInput,
-  ): Promise<Knex | undefined> {
+  private createDynamicKnex(config: DbConnectorKnexInput): Knex | undefined {
     const knexConfig = this.buildKnexConfig(
       {
         client: config.client,

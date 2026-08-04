@@ -87,7 +87,9 @@ export class WebhookService {
     }
   }
 
-  private safeWriteResponseData(data: unknown): unknown | undefined {
+  private safeWriteResponseData(
+    data: unknown,
+  ): Record<string, unknown> | undefined {
     if (!data || typeof data !== 'object' || Array.isArray(data)) {
       return undefined;
     }

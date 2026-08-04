@@ -27,6 +27,7 @@ WORKDIR /app/ui
 ENV NPM_CONFIG_AUDIT=false
 ENV NPM_CONFIG_FUND=false
 
+COPY VERSION /app/VERSION
 COPY ui/package.json ui/package-lock.json ./
 RUN npm ci --cache .npm --prefer-offline
 COPY ui ./
@@ -45,10 +46,32 @@ RUN npm run build
 
 FROM node:22-bookworm-slim AS runtime
 
+ARG APP_VERSION=0.0.0.0
+ARG GIT_REVISION=unknown
+ARG SOURCE_CLEAN=false
+ARG BUILD_PROVENANCE=unverified-local
+ARG RUNTIME_ARTIFACT_SHA256=unknown
+ARG IMAGE_CREATED=unknown
+
+LABEL org.opencontainers.image.title="idmMw" \
+  org.opencontainers.image.description="Avanpost IDM middleware" \
+  org.opencontainers.image.version="${APP_VERSION}" \
+  org.opencontainers.image.revision="${GIT_REVISION}" \
+  org.opencontainers.image.created="${IMAGE_CREATED}" \
+  ru.gkm.source.clean="${SOURCE_CLEAN}" \
+  ru.gkm.build.provenance="${BUILD_PROVENANCE}" \
+  ru.gkm.runtime-artifact.sha256="${RUNTIME_ARTIFACT_SHA256}"
+
 WORKDIR /app
 
 ENV NODE_ENV=production
 ENV PORT=3010
+ENV APP_VERSION=${APP_VERSION}
+ENV GIT_REVISION=${GIT_REVISION}
+ENV SOURCE_CLEAN=${SOURCE_CLEAN}
+ENV BUILD_PROVENANCE=${BUILD_PROVENANCE}
+ENV RUNTIME_ARTIFACT_SHA256=${RUNTIME_ARTIFACT_SHA256}
+ENV IMAGE_CREATED=${IMAGE_CREATED}
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates openssl \
@@ -60,8 +83,21 @@ COPY --from=backend-build /app/dist ./dist
 COPY --from=backend-build /app/prisma ./prisma
 COPY --from=admin-ui-build /app/ui/dist ./ui/dist
 COPY --from=idm-emulator-build /app/idm-emulator/dist ./idm-emulator/dist
+COPY VERSION ./VERSION
 
-RUN mkdir -p /app/data /app/logs && chown -R node:node /app
+RUN set -eu; \
+  mkdir -p /app/build /app/data /app/logs; \
+  if [ "$APP_VERSION" != "0.0.0.0" ] && [ "$(cat /app/VERSION)" != "$APP_VERSION" ]; then \
+    echo "APP_VERSION does not match /app/VERSION" >&2; \
+    exit 1; \
+  fi; \
+  actual_artifact_sha256="$(cd /app/ui/dist && find . -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | awk '{print $1}')"; \
+  printf '%s\n' "$actual_artifact_sha256" > /app/build/runtime-artifact.sha256; \
+  if [ "$RUNTIME_ARTIFACT_SHA256" != "unknown" ] && [ "$actual_artifact_sha256" != "$RUNTIME_ARTIFACT_SHA256" ]; then \
+    echo "RUNTIME_ARTIFACT_SHA256 does not match /app/ui/dist" >&2; \
+    exit 1; \
+  fi; \
+  chown -R node:node /app
 
 USER node
 

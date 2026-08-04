@@ -44,10 +44,7 @@ export class RestConnectorService implements Connector {
 
     const targetUrl = new URL(path.path, config.baseUrl).toString();
     const url = new URL(targetUrl);
-    if (
-      !config.allowPrivateNetwork &&
-      isPrivateOrLocalAddress(url.hostname)
-    ) {
+    if (!config.allowPrivateNetwork && isPrivateOrLocalAddress(url.hostname)) {
       return {
         success: false,
         error: `REST target host is private/local and not allowed: ${url.hostname}`,

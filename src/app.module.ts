@@ -31,6 +31,7 @@ const mockIdmEnabled =
 const adminUiApiExcludes = [
   '/admin/{*any}',
   '/api/{*any}',
+  '/about/{*any}',
   '/auth/{*any}',
   '/health/{*any}',
   '/idm/{*any}',

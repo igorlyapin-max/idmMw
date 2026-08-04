@@ -191,6 +191,14 @@ export const appConfigSchema = z
       .string()
       .transform(Number)
       .default(10),
+    APP_VERSION: z.string().optional(),
+    GIT_REVISION: z.string().optional(),
+    SOURCE_CLEAN: z.enum(['true', 'false']).optional(),
+    BUILD_PROVENANCE: z
+      .enum(['verified', 'unverified-local'])
+      .default('unverified-local'),
+    RUNTIME_ARTIFACT_SHA256: z.string().optional(),
+    IMAGE_CREATED: z.string().optional(),
   })
   .passthrough()
   .superRefine((config, ctx) => {
