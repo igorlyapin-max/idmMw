@@ -33,6 +33,16 @@ other build-time endpoints through a private CA, place the CA files under
 the external base `FROM`, before `npm ci` or `apt-get update`. Real CA files are
 ignored by Git but are included in the Docker build context.
 
+The runtime image also copies `apt/debian.sources` to
+`/etc/apt/sources.list.d/debian.sources` before the first `apt-get update`. The
+committed file uses standard Debian Bookworm repositories. For customer source
+builds that require an internal OS package mirror or proxy, replace
+`apt/debian.sources` in the build context before `docker build`. Do not put
+mirror credentials in this file; use build-host proxy settings, Docker daemon
+configuration, or the approved CI secret mechanism. For canonical verified
+builds, a customer-specific sources file must be part of the clean CI checkout,
+otherwise the clean-source gate correctly rejects the build.
+
 Set `CUSTOMER_CA_REQUIRED=true` when the release build must fail closed if no
 customer CA is present:
 

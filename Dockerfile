@@ -67,6 +67,7 @@ RUN npm run build
 
 FROM node:22-bookworm-slim AS runtime
 COPY certs/customer-ca /usr/local/share/idmmw/customer-ca
+COPY apt/debian.sources /etc/apt/sources.list.d/debian.sources
 ARG CUSTOMER_CA_REQUIRED=false
 RUN set -eu; \
   ca_dir=/usr/local/share/idmmw/customer-ca; \
