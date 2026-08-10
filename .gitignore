@@ -15,6 +15,10 @@ coverage/
 .env.*
 !.env.example
 
+# Customer CA build context
+certs/customer-ca/*
+!certs/customer-ca/README.md
+
 # Generated files
 /generated/prisma/
 

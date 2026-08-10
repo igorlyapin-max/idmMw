@@ -26,6 +26,32 @@ checksum, then verifies those values against the built image. A raw local
 `docker build` is allowed only for development and is treated as
 `unverified-local`.
 
+If the build host reaches the corporate registry, package mirrors, npm proxy or
+other build-time endpoints through a private CA, place the CA files under
+`certs/customer-ca/` before running the helper. Accepted suffixes are `.crt` and
+`.pem`. The Dockerfile copies and activates that directory immediately after
+the external base `FROM`, before `npm ci` or `apt-get update`. Real CA files are
+ignored by Git but are included in the Docker build context.
+
+Set `CUSTOMER_CA_REQUIRED=true` when the release build must fail closed if no
+customer CA is present:
+
+```bash
+CUSTOMER_CA_REQUIRED=true bash scripts/build-verified-image.sh \
+  --profile dev-sqlite \
+  --image REPLACE_REGISTRY/idmmw:dev-sqlite \
+  --push
+```
+
+The verified helper is Docker-first. It does not build `ui/dist` on the host and
+does not use host `npm` output as release evidence. The helper builds a
+temporary Docker image, extracts `/app/build/runtime-artifact.sha256` from that
+image, then builds the final `verified` image and checks the same digest through
+image labels, embedded files, `/health` and `/about`. Build logs contain
+timestamped phase markers for preflight, Docker build, digest extraction,
+runtime smoke and push; use those markers to identify slow registry, mirror or
+dependency phases.
+
 ```bash
 bash scripts/build-verified-image.sh \
   --profile dev-sqlite \

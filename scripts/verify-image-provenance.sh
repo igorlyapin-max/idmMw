@@ -28,6 +28,10 @@ Options:
 USAGE
 }
 
+log() {
+  printf '[%s] %s\n' "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" "$*" >&2
+}
+
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --image)
@@ -79,7 +83,13 @@ if [ -z "$IMAGE" ]; then
 fi
 
 if [ -z "$EXPECTED_ARTIFACT_SHA256" ]; then
-  EXPECTED_ARTIFACT_SHA256="$(scripts/runtime-artifact-sha256.sh ui/dist)"
+  log "extract expected runtime artifact digest from image=${IMAGE}"
+  EXPECTED_ARTIFACT_SHA256="$(docker run --rm --entrypoint cat "$IMAGE" /app/build/runtime-artifact.sha256 | tr -d '[:space:]')"
+fi
+
+if [[ ! "$EXPECTED_ARTIFACT_SHA256" =~ ^[0-9a-f]{64}$ ]]; then
+  echo "Invalid expected runtime artifact digest: ${EXPECTED_ARTIFACT_SHA256}" >&2
+  exit 1
 fi
 
 label() {
@@ -97,11 +107,13 @@ require_equal() {
 }
 
 IMAGE_ID="$(docker image inspect --format '{{.Id}}' "$IMAGE")"
+log "verify image labels image=${IMAGE} image-id=${IMAGE_ID}"
 require_equal "label org.opencontainers.image.version" "$(label org.opencontainers.image.version)" "$EXPECTED_VERSION"
 require_equal "label org.opencontainers.image.revision" "$(label org.opencontainers.image.revision)" "$EXPECTED_REVISION"
 require_equal "label ru.gkm.source.clean" "$(label ru.gkm.source.clean)" "$EXPECTED_SOURCE_CLEAN"
 require_equal "label ru.gkm.build.provenance" "$(label ru.gkm.build.provenance)" "$EXPECTED_PROVENANCE"
 require_equal "label ru.gkm.runtime-artifact.sha256" "$(label ru.gkm.runtime-artifact.sha256)" "$EXPECTED_ARTIFACT_SHA256"
+log "verify embedded image files image=${IMAGE}"
 require_equal "/app/VERSION" "$(docker run --rm --entrypoint cat "$IMAGE" /app/VERSION)" "$EXPECTED_VERSION"
 require_equal "/app/build/runtime-artifact.sha256" "$(docker run --rm --entrypoint cat "$IMAGE" /app/build/runtime-artifact.sha256)" "$EXPECTED_ARTIFACT_SHA256"
 
@@ -112,6 +124,7 @@ if [ "$CHECK_RUNTIME" = "true" ]; then
   }
   trap cleanup EXIT INT TERM
 
+  log "runtime smoke start image=${IMAGE} port=${PORT}"
   docker run -d \
     --name "$CONTAINER_NAME" \
     -p "127.0.0.1:${PORT}:3010" \
@@ -170,6 +183,7 @@ assertBuild('about', about);
 NODE
 
   rm -f /tmp/idmmw-health-$$.json /tmp/idmmw-about-$$.json
+  log "runtime smoke passed image=${IMAGE}"
 fi
 
 echo "Image provenance verified for ${IMAGE} (${IMAGE_ID})"

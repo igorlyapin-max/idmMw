@@ -65,6 +65,9 @@ bash scripts/build-verified-image.sh \
   --push
 ```
 
+The verified helper builds and verifies the Admin UI inside Docker. It does not
+use host `npm --prefix ui run build` or local `ui/dist` as release evidence.
+
 Run:
 
 ```bash
@@ -189,6 +192,9 @@ bash scripts/build-verified-image.sh \
   --no-runtime \
   --push
 ```
+
+The runtime artifact digest is extracted from a Docker-built image, then checked
+against the final image labels and diagnostics.
 
 Run one instance with compose template:
 
