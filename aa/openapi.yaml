@@ -3,13 +3,13 @@ info:
   title: idmMw HTTP API
   version: 0.1.0
   description: >
-    Repo-owned HTTP contracts for idmMw. Flow identifiers match
-    aa/information-model.md.
+    HTTP-контракты idmMw, которыми владеет репозиторий. Идентификаторы потоков
+    совпадают с aa/information-model.md.
 servers:
   - url: http://localhost:3010
-    description: Local/default HTTP listener
+    description: Локальный/default HTTP listener
   - url: https://localhost:3010
-    description: Local/default HTTPS listener when HTTP_TLS_ENABLED=true
+    description: Локальный/default HTTPS listener при HTTP_TLS_ENABLED=true
 tags:
   - name: Health
   - name: IDM Webhook
@@ -21,11 +21,11 @@ paths:
   /health:
     get:
       tags: [Health]
-      summary: Liveness and build identity
-      description: "Flow: IF-009"
+      summary: Проверка liveness и build identity
+      description: "Поток: IF-009"
       responses:
         "200":
-          description: Process is alive.
+          description: Процесс обслуживает запросы.
           content:
             application/json:
               schema:
@@ -33,11 +33,11 @@ paths:
   /about:
     get:
       tags: [Health]
-      summary: Safe build identity
-      description: "Flow: IF-009"
+      summary: Безопасная build identity
+      description: "Поток: IF-009"
       responses:
         "200":
-          description: Build identity.
+          description: Build identity сервиса.
           content:
             application/json:
               schema:
@@ -45,39 +45,39 @@ paths:
   /ready:
     get:
       tags: [Health]
-      summary: Dependency readiness
-      description: "Flow: IF-009"
+      summary: Readiness зависимостей
+      description: "Поток: IF-009"
       responses:
         "200":
-          description: Dependencies are ready.
+          description: Зависимости готовы.
           content:
             application/json:
               schema:
                 type: object
         "503":
-          description: One or more dependencies are not ready.
+          description: Одна или несколько зависимостей не готовы.
   /metrics:
     get:
       tags: [Metrics]
-      summary: Prometheus metrics
-      description: "Flow: IF-010. Protected by integration auth when METRICS_PUBLIC_ENABLED=false."
+      summary: Метрики Prometheus
+      description: "Поток: IF-010. Защищено integration auth при METRICS_PUBLIC_ENABLED=false."
       security:
         - integrationHmac: []
         - {}
       responses:
         "200":
-          description: Prometheus text exposition.
+          description: Текстовая экспозиция Prometheus.
           content:
             text/plain:
               schema:
                 type: string
         "401":
-          description: Authentication required by deployment policy.
+          description: Требуется authentication согласно deployment policy.
   /webhooks/avanpost:
     post:
       tags: [IDM Webhook]
-      summary: Receive Avanpost-compatible event
-      description: "Flow: IF-001"
+      summary: Прием Avanpost-compatible event
+      description: "Поток: IF-001"
       security:
         - integrationHmac: []
         - {}
@@ -89,28 +89,28 @@ paths:
               $ref: "#/components/schemas/AvanpostWebhook"
       responses:
         "201":
-          description: Event accepted and processed or queued.
+          description: Событие принято и обработано или поставлено в очередь.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/WebhookResult"
         "400":
-          description: Invalid payload or connector read error.
+          description: Некорректный payload или ошибка чтения connector.
         "404":
-          description: Target system not found.
+          description: Целевая система не найдена.
         "500":
-          description: Processing failed.
+          description: Ошибка обработки.
   /idm/target-systems:
     get:
       tags: [IDM Facade]
-      summary: List enabled target systems for IDM
-      description: "Flow: IF-002. Does not return connector config or secrets."
+      summary: Список enabled target systems для IDM
+      description: "Поток: IF-002. Не возвращает connector config или secrets."
       security:
         - integrationHmac: []
         - {}
       responses:
         "200":
-          description: Enabled target systems catalog.
+          description: Каталог включенных target systems.
           content:
             application/json:
               schema:
@@ -120,8 +120,8 @@ paths:
   /idm/target-systems/{name}:
     get:
       tags: [IDM Facade]
-      summary: Get one target system catalog entry
-      description: "Flow: IF-002"
+      summary: Получить одну запись target system catalog
+      description: "Поток: IF-002"
       security:
         - integrationHmac: []
         - {}
@@ -129,18 +129,18 @@ paths:
         - $ref: "#/components/parameters/TargetSystemName"
       responses:
         "200":
-          description: Catalog entry.
+          description: Запись catalog.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/IdmTargetSystem"
         "404":
-          description: Target system not found or disabled.
+          description: Целевая система не найдена или отключена.
   /idm/{targetSystem}/test:
     get:
       tags: [IDM Facade]
-      summary: Test target system connection
-      description: "Flow: IF-002"
+      summary: Проверить соединение с target system
+      description: "Поток: IF-002"
       security:
         - integrationHmac: []
         - {}
@@ -148,20 +148,20 @@ paths:
         - $ref: "#/components/parameters/TargetSystem"
       responses:
         "200":
-          description: Connector-defined test result.
+          description: Результат проверки в формате connector.
           content:
             application/json:
               schema:
                 type: object
         "400":
-          description: Connector failed.
+          description: Connector завершился ошибкой.
         "404":
-          description: Target system not found.
+          description: Целевая система не найдена.
   /idm/{targetSystem}/users:
     get:
       tags: [IDM Facade]
-      summary: Search users
-      description: "Flow: IF-002"
+      summary: Поиск users
+      description: "Поток: IF-002"
       security:
         - integrationHmac: []
         - {}
@@ -179,18 +179,18 @@ paths:
             default: 50
       responses:
         "200":
-          description: Connector-defined user list.
+          description: Список users в формате connector.
           content:
             application/json:
               schema:
                 type: object
         "400":
-          description: Invalid limit or connector failed.
+          description: Некорректный limit или ошибка connector.
   /idm/{targetSystem}/users/resolve:
     get:
       tags: [IDM Facade]
-      summary: Resolve user by username, login or filter
-      description: "Flow: IF-002"
+      summary: Найти user по username, login или filter
+      description: "Поток: IF-002"
       security:
         - integrationHmac: []
         - {}
@@ -210,7 +210,7 @@ paths:
             type: string
       responses:
         "200":
-          description: Connector-defined user resolution result.
+          description: Результат разрешения user в формате connector.
           content:
             application/json:
               schema:
@@ -218,8 +218,8 @@ paths:
   /idm/{targetSystem}/users/{id}:
     get:
       tags: [IDM Facade]
-      summary: Get user by id
-      description: "Flow: IF-002"
+      summary: Получить user по id
+      description: "Поток: IF-002"
       security:
         - integrationHmac: []
         - {}
@@ -228,7 +228,7 @@ paths:
         - $ref: "#/components/parameters/EntityId"
       responses:
         "200":
-          description: Connector-defined user result.
+          description: Результат user в формате connector.
           content:
             application/json:
               schema:
@@ -236,8 +236,8 @@ paths:
   /idm/{targetSystem}/groups:
     get:
       tags: [IDM Facade]
-      summary: Search groups
-      description: "Flow: IF-002"
+      summary: Поиск groups
+      description: "Поток: IF-002"
       security:
         - integrationHmac: []
         - {}
@@ -255,7 +255,7 @@ paths:
             default: 50
       responses:
         "200":
-          description: Connector-defined group list.
+          description: Список groups в формате connector.
           content:
             application/json:
               schema:
@@ -263,8 +263,8 @@ paths:
   /idm/{targetSystem}/groups/{id}:
     get:
       tags: [IDM Facade]
-      summary: Get group by id
-      description: "Flow: IF-002"
+      summary: Получить group по id
+      description: "Поток: IF-002"
       security:
         - integrationHmac: []
         - {}
@@ -273,7 +273,7 @@ paths:
         - $ref: "#/components/parameters/EntityId"
       responses:
         "200":
-          description: Connector-defined group result.
+          description: Результат group в формате connector.
           content:
             application/json:
               schema:
@@ -281,8 +281,8 @@ paths:
   /idm/{targetSystem}/schema:
     get:
       tags: [IDM Facade]
-      summary: Get connector schema
-      description: "Flow: IF-002"
+      summary: Получить connector schema
+      description: "Поток: IF-002"
       security:
         - integrationHmac: []
         - {}
@@ -290,7 +290,7 @@ paths:
         - $ref: "#/components/parameters/TargetSystem"
       responses:
         "200":
-          description: Connector-defined schema.
+          description: Schema в формате connector.
           content:
             application/json:
               schema:
@@ -298,8 +298,8 @@ paths:
   /idm/{targetSystem}/sync:
     post:
       tags: [IDM Facade]
-      summary: Trigger connector sync
-      description: "Flow: IF-002"
+      summary: Запустить connector sync
+      description: "Поток: IF-002"
       security:
         - integrationHmac: []
         - {}
@@ -317,7 +317,7 @@ paths:
                   enum: [full, incremental]
       responses:
         "200":
-          description: Connector-defined sync result.
+          description: Результат sync в формате connector.
           content:
             application/json:
               schema:
@@ -325,11 +325,11 @@ paths:
   /auth/session:
     get:
       tags: [Auth]
-      summary: Current admin session status
-      description: "Flow: IF-003"
+      summary: Текущий статус admin session
+      description: "Поток: IF-003"
       responses:
         "200":
-          description: Session status.
+          description: Статус session.
           content:
             application/json:
               schema:
@@ -337,8 +337,8 @@ paths:
   /auth/login:
     post:
       tags: [Auth]
-      summary: Local admin login
-      description: "Flow: IF-003"
+      summary: Локальный admin login
+      description: "Поток: IF-003"
       requestBody:
         required: true
         content:
@@ -353,7 +353,7 @@ paths:
                   format: password
       responses:
         "201":
-          description: Session status after login attempt.
+          description: Статус session после попытки login.
           content:
             application/json:
               schema:
@@ -361,11 +361,11 @@ paths:
   /auth/sso-login:
     post:
       tags: [Auth]
-      summary: SSO admin login through trusted proxy headers
-      description: "Flow: IF-003"
+      summary: SSO admin login через trusted proxy headers
+      description: "Поток: IF-003"
       responses:
         "201":
-          description: Session status after SSO login attempt.
+          description: Статус session после попытки SSO login.
           content:
             application/json:
               schema:
@@ -373,11 +373,11 @@ paths:
   /auth/logout:
     post:
       tags: [Auth]
-      summary: Logout current admin session
-      description: "Flow: IF-003"
+      summary: Logout текущей admin session
+      description: "Поток: IF-003"
       responses:
         "201":
-          description: Logout result.
+          description: Результат logout.
           content:
             application/json:
               schema:
@@ -390,13 +390,13 @@ paths:
   /admin/stats:
     get:
       tags: [Admin]
-      summary: Admin operational summary
-      description: "Flow: IF-003"
+      summary: Операционная сводка Admin
+      description: "Поток: IF-003"
       security:
         - adminSession: []
       responses:
         "200":
-          description: DLQ and runtime summary.
+          description: Сводка DLQ и runtime.
           content:
             application/json:
               schema:
@@ -404,8 +404,8 @@ paths:
   /admin/dlq:
     get:
       tags: [Admin]
-      summary: List DLQ items
-      description: "Flow: IF-003"
+      summary: Список DLQ items
+      description: "Поток: IF-003"
       security:
         - adminSession: []
       parameters:
@@ -429,7 +429,7 @@ paths:
             minimum: 0
       responses:
         "200":
-          description: DLQ page.
+          description: Страница DLQ.
           content:
             application/json:
               schema:
@@ -437,8 +437,8 @@ paths:
   /admin/dlq/retry:
     post:
       tags: [Admin]
-      summary: Retry many DLQ items
-      description: "Flow: IF-003"
+      summary: Повторная обработка нескольких DLQ items
+      description: "Поток: IF-003"
       security:
         - adminSession: []
       requestBody:
@@ -457,7 +457,7 @@ paths:
                   minimum: 1
       responses:
         "201":
-          description: Retry summary.
+          description: Сводка retry.
           content:
             application/json:
               schema:
@@ -465,45 +465,45 @@ paths:
   /admin/dlq/{id}/retry:
     post:
       tags: [Admin]
-      summary: Retry one DLQ item
-      description: "Flow: IF-003"
+      summary: Повторная обработка одного DLQ item
+      description: "Поток: IF-003"
       security:
         - adminSession: []
       parameters:
         - $ref: "#/components/parameters/EntityId"
       responses:
         "201":
-          description: Retry accepted.
+          description: Повторная обработка принята.
   /admin/dlq/{id}/skip:
     post:
       tags: [Admin]
-      summary: Skip one DLQ item
-      description: "Flow: IF-003"
+      summary: Пропустить один DLQ item
+      description: "Поток: IF-003"
       security:
         - adminSession: []
       parameters:
         - $ref: "#/components/parameters/EntityId"
       responses:
         "201":
-          description: Item skipped.
+          description: Item помечен как skipped.
   /admin/target-systems:
     get:
       tags: [Admin]
-      summary: List target systems
-      description: "Flow: IF-003"
+      summary: Список target systems
+      description: "Поток: IF-003"
       security:
         - adminSession: []
       responses:
         "200":
-          description: Target system page.
+          description: Страница target system.
           content:
             application/json:
               schema:
                 type: object
     post:
       tags: [Admin]
-      summary: Create target system
-      description: "Flow: IF-003. Request may contain connector config; never log or expose secret values."
+      summary: Создать target system
+      description: "Поток: IF-003. Request может содержать connector config; secret values нельзя логировать или раскрывать."
       security:
         - adminSession: []
       requestBody:
@@ -514,7 +514,7 @@ paths:
               $ref: "#/components/schemas/TargetSystemWrite"
       responses:
         "201":
-          description: Created target system.
+          description: Созданная target system.
           content:
             application/json:
               schema:
@@ -522,23 +522,23 @@ paths:
   /admin/target-systems/{id}:
     get:
       tags: [Admin]
-      summary: Get target system by id
-      description: "Flow: IF-003"
+      summary: Получить target system по id
+      description: "Поток: IF-003"
       security:
         - adminSession: []
       parameters:
         - $ref: "#/components/parameters/EntityId"
       responses:
         "200":
-          description: Target system.
+          description: Целевая система.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/TargetSystem"
     patch:
       tags: [Admin]
-      summary: Update target system
-      description: "Flow: IF-003"
+      summary: Обновить target system
+      description: "Поток: IF-003"
       security:
         - adminSession: []
       parameters:
@@ -551,42 +551,42 @@ paths:
               $ref: "#/components/schemas/TargetSystemWrite"
       responses:
         "200":
-          description: Updated target system.
+          description: Обновленная target system.
     delete:
       tags: [Admin]
-      summary: Delete target system
-      description: "Flow: IF-003"
+      summary: Удалить target system
+      description: "Поток: IF-003"
       security:
         - adminSession: []
       parameters:
         - $ref: "#/components/parameters/EntityId"
       responses:
         "200":
-          description: Delete result.
+          description: Результат удаления.
   /admin/target-systems/name/{name}:
     get:
       tags: [Admin]
-      summary: Get target system by name
-      description: "Flow: IF-003"
+      summary: Получить target system по name
+      description: "Поток: IF-003"
       security:
         - adminSession: []
       parameters:
         - $ref: "#/components/parameters/TargetSystemName"
       responses:
         "200":
-          description: Target system.
+          description: Целевая система.
   /admin/target-systems/{id}/test:
     post:
       tags: [Admin]
-      summary: Test target system connection
-      description: "Flow: IF-003 and IF-006"
+      summary: Проверить соединение с target system
+      description: "Потоки: IF-003 и IF-006"
       security:
         - adminSession: []
       parameters:
         - $ref: "#/components/parameters/EntityId"
       responses:
         "200":
-          description: Connector-defined test result.
+          description: Результат проверки в формате connector.
 components:
   securitySchemes:
     adminSession:
@@ -597,7 +597,7 @@ components:
       type: apiKey
       in: header
       name: x-idmmw-signature
-      description: Deployment-specific HMAC header when INTEGRATION_AUTH_ENABLED=true.
+      description: HMAC header конкретного deployment при INTEGRATION_AUTH_ENABLED=true.
   parameters:
     TargetSystem:
       name: targetSystem
@@ -731,7 +731,7 @@ components:
           type: boolean
         config:
           type: object
-          description: Connector configuration. May contain secret references or encrypted values.
+          description: Connector configuration. Может содержать secret references или encrypted values.
     TargetSystem:
       allOf:
         - $ref: "#/components/schemas/TargetSystemWrite"

@@ -3,42 +3,42 @@ info:
   title: idmMw Kafka API
   version: 0.1.0
   description: >
-    Kafka contracts for idmMw async processing. Topic names match
-    aa/information-model.md and aa/kafka-access-map.md.
+    Kafka-контракты для async processing в idmMw. Имена topics совпадают с
+    aa/information-model.md и aa/kafka-access-map.md.
 servers:
   productionKafka:
     url: kafka-1.example.local:9093,kafka-2.example.local:9093,kafka-3.example.local:9093
     protocol: kafka-secure
-    description: Production placeholder from committed env examples.
+    description: Production placeholder из committed env examples.
 channels:
   idm.events.in:
-    description: "Flow IF-004: async write input topic."
+    description: "Поток IF-004: topic входящих событий async write."
     publish:
-      summary: idmMw dispatcher publishes write events for worker processing.
+      summary: idmMw dispatcher публикует события write для обработки worker.
       operationId: publishAsyncWriteEvent
       message:
         $ref: "#/components/messages/ProcessingPayload"
     subscribe:
-      summary: idmMw worker consumes write events in async mode.
+      summary: idmMw worker потребляет события write в async mode.
       operationId: consumeAsyncWriteEvent
       message:
         $ref: "#/components/messages/ProcessingPayload"
   idm.events.out:
-    description: "Flow IF-004: processing status topic."
+    description: "Поток IF-004: topic статусов обработки."
     publish:
-      summary: idmMw worker publishes success or failure status.
+      summary: idmMw worker публикует status успеха или отказа.
       operationId: publishProcessingStatus
       message:
         $ref: "#/components/messages/ProcessingStatus"
   idm.dlq.retry:
-    description: "Flow IF-005: DLQ retry topic."
+    description: "Поток IF-005: topic DLQ retry."
     publish:
-      summary: Admin retry path publishes a DLQ retry request.
+      summary: Admin retry path публикует DLQ retry request.
       operationId: publishDlqRetry
       message:
         $ref: "#/components/messages/DlqRetry"
     subscribe:
-      summary: idmMw worker consumes DLQ retry requests.
+      summary: idmMw worker потребляет DLQ retry requests.
       operationId: consumeDlqRetry
       message:
         $ref: "#/components/messages/DlqRetry"
@@ -46,19 +46,19 @@ components:
   messages:
     ProcessingPayload:
       name: ProcessingPayload
-      title: Processing payload
+      title: Payload обработки
       contentType: application/json
       payload:
         $ref: "#/components/schemas/ProcessingPayload"
     ProcessingStatus:
       name: ProcessingStatus
-      title: Processing status
+      title: Статус обработки
       contentType: application/json
       payload:
         $ref: "#/components/schemas/ProcessingStatus"
     DlqRetry:
       name: DlqRetry
-      title: DLQ retry payload
+      title: Payload DLQ retry
       contentType: application/json
       payload:
         $ref: "#/components/schemas/DlqRetry"
@@ -69,13 +69,13 @@ components:
       properties:
         eventId:
           type: string
-          description: Business event identifier.
+          description: Идентификатор business event.
         operation:
           type: string
-          description: Avanpost-compatible operation name.
+          description: Имя Avanpost-compatible operation.
         targetSystem:
           type: string
-          description: Connector routing key matching TargetSystem.name.
+          description: Routing key connector, совпадающий с TargetSystem.name.
         payload:
           type: object
           properties:
@@ -104,7 +104,7 @@ components:
           type: string
         error:
           type: string
-          description: Safe error summary without secret values.
+          description: Безопасное error summary без secret values.
     DlqRetry:
       allOf:
         - $ref: "#/components/schemas/ProcessingPayload"
@@ -113,11 +113,11 @@ components:
           properties:
             dlqItemId:
               type: string
-              description: DLQ item to retry.
+              description: DLQ item для retry.
   securitySchemes:
     kafkaTls:
       type: X509
-      description: TLS configured by KAFKA_TLS_* environment variables.
+      description: TLS настраивается переменными окружения `KAFKA_TLS_*`.
     encryptedPayload:
       type: symmetricEncryption
-      description: Payload encryption through ENCRYPTION_KAFKA_ENABLED or global ENCRYPTION_ENABLED.
+      description: Payload encryption через `ENCRYPTION_KAFKA_ENABLED` или global `ENCRYPTION_ENABLED`.

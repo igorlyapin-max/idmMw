@@ -1,17 +1,17 @@
-# Deployment
+# Развертывание
 
-The repository provides image-only Compose profiles for administrator-facing
-contours. Development-only local Node workflows are reference information, not
-GKM deployment contours.
+Репозиторий предоставляет image-only Compose profiles для контуров,
+ориентированных на администраторов. Development-only локальные Node workflows
+являются справочной информацией, а не GKM deployment contours.
 
-## Test IT
+## Тестовый ИТ-контур
 
-Test IT uses the disposable `sqlite-test` profile for CI smoke and local
+Тестовый ИТ-контур использует disposable profile `sqlite-test` для CI smoke и локальной
 container verification.
 
 ```mermaid
 flowchart LR
-  Tester[CI/local tester]
+  Tester[CI/локальный tester]
   App[idmMw container :3010\nsqlite-test]
   SQLite[(SQLite file in container)]
   Logs[(JSON log file)]
@@ -21,28 +21,28 @@ flowchart LR
   App -->|LOG_SINK=file| Logs
 ```
 
-| Connection | Protocol / port | Config |
+| Соединение | Протокол / порт | Конфигурация |
 | --- | --- | --- |
 | Tester to idmMw | HTTP `3010` | `PORT=3010` |
 | idmMw to SQLite | local file | `DATABASE_URL=file:/tmp/...` |
-| idmMw logs | file plus stdout/stderr | `LOG_SINK=file` |
+| Логи idmMw | file plus stdout/stderr | `LOG_SINK=file` |
 
-## Business Test
+## Контур бизнес-тестирования
 
-Business Test should use the same topology as Production with non-production
-values: external PostgreSQL-compatible DB, Kafka when async mode is tested,
-production-like TLS, admin auth and metrics protection.
+Контур бизнес-тестирования должен использовать ту же topology, что и
+Production, но с non-production значениями: внешняя PostgreSQL-compatible DB,
+Kafka при проверке async mode, production-like TLS, admin auth и защита metrics.
 
 ```mermaid
 flowchart TB
-  IDM[Avanpost IDM test]
-  LB[Test reverse proxy / gateway :443]
+  IDM[Тестовый Avanpost IDM]
+  LB[Тестовый reverse proxy / gateway :443]
   App[idmMw container :3010]
   DB[(YugabyteDB :5433 or CockroachDB :26257)]
   Kafka[(Kafka :9093)]
   Prom[Prometheus :9090]
   Logs[Collector / sidecar]
-  Targets[Target systems test endpoints]
+  Targets[Тестовые endpoints целевых систем]
 
   IDM -->|HTTPS :443| LB
   LB -->|HTTP or HTTPS :3010| App
@@ -53,15 +53,15 @@ flowchart TB
   App -->|stdout/stderr or file| Logs
 ```
 
-## Production
+## Промышленный контур
 
-Production HA uses prebuilt images, multiple identical idmMw workers behind an
-external reverse proxy/load balancer, external DB and Kafka, protected Admin UI,
-encrypted persisted payloads and an operational log sink.
+Production HA использует prebuilt images, несколько одинаковых idmMw workers за
+внешним reverse proxy/load balancer, внешние DB и Kafka, защищенный Admin UI,
+encrypted persisted payloads и operational log sink.
 
 ```mermaid
 flowchart TB
-  IDM[Avanpost IDM production]
+  IDM[Промышленный Avanpost IDM]
   LB[Reverse proxy / load balancer :443]
   App1[idmMw worker 1 :3010]
   App2[idmMw worker 2 :3010]
@@ -72,7 +72,7 @@ flowchart TB
   Prom[Prometheus :9090]
   Logs[Collector / sidecar / platform logging]
   PAM[Indeed PAM/AAPM :443]
-  Targets[Target systems]
+  Targets[Целевые системы]
 
   IDM -->|HTTPS :443| LB
   LB -->|HTTP(S) :3010| App1
@@ -99,20 +99,20 @@ flowchart TB
   AppN --> Logs
 ```
 
-| Contour | Compose / env | Required checks |
+| Контур | Compose / env | Обязательные проверки |
 | --- | --- | --- |
-| Test IT | `deploy/docker-compose.sqlite-test.yml`, `deploy/profiles/sqlite-test.env.example` | profile validation, smoke, `/health`, `/about`, `/metrics` |
-| Business Test | `deploy/docker-compose.prod-ha.yml`, copied non-prod env | `docker compose config`, migration, readiness, Kafka/DB/TLS smoke |
-| Production | `deploy/docker-compose.prod-ha.yml`, `prod-ha-yugabyte` or `prod-ha-cockroach` env | verified image identity, migration, `/ready`, metrics, external log route |
+| Тестовый ИТ-контур | `deploy/docker-compose.sqlite-test.yml`, `deploy/profiles/sqlite-test.env.example` | profile validation, smoke, `/health`, `/about`, `/metrics` |
+| Контур бизнес-тестирования | `deploy/docker-compose.prod-ha.yml`, copied non-prod env | `docker compose config`, migration, readiness, Kafka/DB/TLS smoke |
+| Промышленный контур | `deploy/docker-compose.prod-ha.yml`, `prod-ha-yugabyte` или `prod-ha-cockroach` env | verified image identity, migration, `/ready`, metrics, external log route |
 
-## Production Invariants
+## Инварианты production
 
-- Runtime host consumes `image:` only, not `build:`.
+- Runtime host использует только `image:`, не `build:`.
 - `ADMIN_AUTH_ENABLED=true`.
-- `HTTP_TLS_ENABLED=true` or trusted gateway TLS is explicitly documented.
+- `HTTP_TLS_ENABLED=true` или trusted gateway TLS явно документирован.
 - `INTEGRATION_AUTH_ENABLED=true`.
 - `ENCRYPTION_ENABLED=true`.
-- `IDMMW_PROCESSING_MODE=async` requires `KAFKA_ENABLED=true`.
-- `METRICS_PUBLIC_ENABLED=false` unless the route is isolated.
-- Structured logs always go to stdout/stderr; `LOG_SINK=file` plus sidecar or
-  platform collector provides the second operational route.
+- `IDMMW_PROCESSING_MODE=async` требует `KAFKA_ENABLED=true`.
+- `METRICS_PUBLIC_ENABLED=false`, если route не изолирован платформой.
+- Structured logs всегда идут в stdout/stderr; `LOG_SINK=file` plus sidecar или
+  platform collector обеспечивает второй operational route.

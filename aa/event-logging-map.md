@@ -1,26 +1,27 @@
-# Event Logging Map
+# Карта событий логирования
 
-Structured logs are emitted through pino to stdout/stderr. `LOG_SINK=file` adds
-a second JSON file sink. Diagnostic logging has `Basic` and temporary redacted
-`Verbose` levels.
+Structured logs отправляются через pino в stdout/stderr. `LOG_SINK=file`
+добавляет второй JSON file sink. Diagnostic logging поддерживает `Basic` и
+временный redacted `Verbose`.
 
-| Flow ID | Event class | Producer | When recorded | Required fields | Redaction / constraints |
+| ID потока | Класс события | Источник | Когда фиксируется | Обязательные поля | Redaction / ограничения |
 | --- | --- | --- | --- | --- | --- |
-| IF-001 | `idm.webhook.received` | `WebhookController` / diagnostics | inbound webhook accepted for processing | `eventId`, `operation`, `targetSystem`, mode | no raw secrets; verbose payload only with redaction |
-| IF-001, IF-008 | audit event | `AuditInterceptor` / core services | inbound and outbound processing | event id, operation, target system, status, error summary | persisted audit JSON can contain business payload; enable encryption in production |
-| IF-004, IF-005 | Kafka producer/consumer status | Kafka services | connect, consume, publish, failure | topic, partition when available, status/error summary | do not log message payload secrets |
-| IF-006 | connector operation result | connector/core services | connector success/failure/retry | connector, operation, target system, status | redact endpoint credentials, tokens, passwords, TLS material |
-| IF-003 | admin auth/session event | auth/admin services | login, SSO login, logout, unauthorized request | user id/name where safe, result | no passwords or session cookie values |
-| IF-003, IF-008 | TargetSystem CRUD | admin services | create/update/delete/test | target system id/name/type, result | never log `TargetSystem.config` secret values |
-| IF-003, IF-008 | DLQ action | admin/DLQ services | retry, skip, retry-many, lease conflict | DLQ id, target system, status | do not log replay payload by default |
-| IF-009 | `startup.complete` | `main.ts` | process startup complete | URLs, TLS/debug/logging state | no secrets |
-| IF-009 | shutdown signal | `main.ts` | SIGINT/SIGTERM | signal, service URLs | no secrets |
-| IF-010 | metrics scrape | HTTP metrics middleware | request completion | method, normalized route, status, duration | no query values or bodies |
-| IF-011 | secret provider operation | secret resolver | secret resolution success/failure | provider, reference id/path where safe, status | never log resolved secret value or token |
+| IF-001 | `idm.webhook.received` | `WebhookController` / diagnostics | inbound webhook принят в обработку | `eventId`, `operation`, `targetSystem`, mode | без raw secrets; verbose payload только с redaction |
+| IF-001, IF-008 | audit event | `AuditInterceptor` / core services | inbound и outbound processing | event id, operation, target system, status, error summary | persisted audit JSON может содержать business payload; в production включать encryption |
+| IF-004, IF-005 | Kafka producer/consumer status | Kafka services | connect, consume, publish, failure | topic, partition при наличии, status/error summary | не логировать message payload secrets |
+| IF-006 | connector operation result | connector/core services | success/failure/retry connector | connector, operation, target system, status | redact endpoint credentials, tokens, passwords, TLS material |
+| IF-003 | admin auth/session event | auth/admin services | login, SSO login, logout, unauthorized request | user id/name если безопасно, result | без passwords или session cookie values |
+| IF-003, IF-008 | TargetSystem CRUD | admin services | create/update/delete/test | target system id/name/type, result | никогда не логировать secret values из `TargetSystem.config` |
+| IF-003, IF-008 | DLQ action | admin/DLQ services | retry, skip, retry-many, lease conflict | DLQ id, target system, status | replay payload по умолчанию не логировать |
+| IF-009 | `startup.complete` | `main.ts` | process startup complete | URLs, TLS/debug/logging state | без secrets |
+| IF-009 | shutdown signal | `main.ts` | SIGINT/SIGTERM | signal, service URLs | без secrets |
+| IF-010 | metrics scrape | HTTP metrics middleware | request completion | method, normalized route, status, duration | без query values или bodies |
+| IF-011 | secret provider operation | secret resolver | success/failure при secret resolution | provider, reference id/path если безопасно, status | никогда не логировать resolved secret value или token |
 
-Operational requirements:
+Операционные требования:
 
-- `DebugLogging__Enabled=false` by default in production.
-- `DebugLogging__Level=Verbose` is incident-only and must preserve redaction.
-- Production delivery must prove an external log route: platform collector,
-  sidecar, syslog, ELK/OpenSearch, Kafka log route or approved equivalent.
+- `DebugLogging__Enabled=false` по умолчанию в production.
+- `DebugLogging__Level=Verbose` используется только для incident diagnostics и
+  должен сохранять redaction.
+- Production delivery должен доказывать внешний log route: platform collector,
+  sidecar, syslog, ELK/OpenSearch, Kafka log route или approved equivalent.

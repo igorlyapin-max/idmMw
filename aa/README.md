@@ -1,67 +1,68 @@
-# idmMw Architecture Artifacts
+# Архитектурные артефакты idmMw
 
-This directory is the GKM AA artifact set for idmMw. It complements
-`docs/architecture/` with governance-facing contracts: business processes,
-information flows, deployment contours, OpenAPI, AsyncAPI, healthchecks,
-metrics, secrets, Kafka access and event logging.
+Этот каталог содержит комплект GKM AA для idmMw. Он дополняет
+`docs/architecture/` governance-ориентированными контрактами: бизнес-процессы,
+информационные потоки, контуры развертывания, OpenAPI, AsyncAPI, healthcheck,
+метрики, секреты, Kafka access и карту событий логирования.
 
-## Boundary
+## Граница системы
 
-idmMw is a NestJS middleware between Avanpost IDM 7.8 and managed target
-systems. It owns:
+idmMw - NestJS middleware между Avanpost IDM 7.8 и управляемыми целевыми
+системами. Репозиторий владеет:
 
-- inbound IDM HTTP contracts on port `3010`;
-- Admin UI and Admin API on the same port `3010`;
-- connector routing, retry, DLQ, audit, metrics, diagnostic logging and
-  optional Kafka worker flows;
-- container deployment profiles under `deploy/`.
+- входящими IDM HTTP-контрактами на порту `3010`;
+- Admin UI и Admin API на том же порту `3010`;
+- маршрутизацией connector'ов, retry, DLQ, audit, metrics, diagnostic logging и
+  опциональными Kafka worker flows;
+- контейнерными профилями развертывания в `deploy/`.
 
-External systems such as Avanpost IDM, target systems, Kafka, Redis, DB,
-Prometheus, PAM/AAPM and platform log collectors are integration participants,
-not code owned by this repository.
+Внешние системы Avanpost IDM, target systems, Kafka, Redis, DB, Prometheus,
+PAM/AAPM и платформенные log collectors являются участниками интеграции, а не
+кодом, которым владеет этот репозиторий.
 
-## Artifact Index
+## Индекс артефактов
 
-| Artifact | File |
+| Артефакт | Файл |
 | --- | --- |
-| Business processes | [business-processes.md](business-processes.md) |
-| Information model | [information-model.md](information-model.md) |
-| Deployment contours | [deployment.md](deployment.md) |
+| Бизнес-процессы | [business-processes.md](business-processes.md) |
+| Информационная модель | [information-model.md](information-model.md) |
+| Контуры развертывания | [deployment.md](deployment.md) |
 | OpenAPI | [openapi.yaml](openapi.yaml) |
 | AsyncAPI | [asyncapi.yaml](asyncapi.yaml) |
-| Kafka access map | [kafka-access-map.md](kafka-access-map.md) |
-| Healthcheck map | [healthcheck-map.md](healthcheck-map.md) |
-| Metrics map | [metrics-map.md](metrics-map.md) |
-| Secrets map | [secrets-map.md](secrets-map.md) |
-| Event logging map | [event-logging-map.md](event-logging-map.md) |
+| Карта доступа Kafka | [kafka-access-map.md](kafka-access-map.md) |
+| Карта healthcheck | [healthcheck-map.md](healthcheck-map.md) |
+| Карта метрик | [metrics-map.md](metrics-map.md) |
+| Карта секретов | [secrets-map.md](secrets-map.md) |
+| Карта событий логирования | [event-logging-map.md](event-logging-map.md) |
 
-## Omitted or Out of Scope
+## Исключено из области
 
-| Surface | Status | Reason |
+| Поверхность | Статус | Причина |
 | --- | --- | --- |
-| Target-system upstream APIs | out of scope | idmMw calls them through connectors but does not own their HTTP/DB contracts. |
-| `mock-idm` endpoints | dev/test only | They support local scenario generation and are not a production IDM contract. |
-| VSDX exports | not generated | Markdown, Mermaid and YAML sources are authoritative in git; image/VSDX export is a separate delivery step if requested. |
+| Upstream API целевых систем | вне области | idmMw вызывает их через connector'ы, но не владеет их HTTP/DB контрактами. |
+| Endpoints `mock-idm` | только dev/test | Они нужны для локальной генерации сценариев и не являются production IDM contract. |
+| VSDX exports | не сгенерированы | Markdown, Mermaid и YAML sources являются авторитетными в git; image/VSDX export выполняется отдельным delivery step по запросу. |
 
-## Naming
+## Именование
 
-Information flows use stable IDs `IF-001`, `IF-002`, and so on. The same IDs
-are referenced from OpenAPI, AsyncAPI, healthcheck, metrics, secrets, Kafka and
-event logging artifacts.
+Информационные потоки используют стабильные ID `IF-001`, `IF-002` и далее. Те
+же ID используются в OpenAPI, AsyncAPI, healthcheck, metrics, secrets, Kafka и
+event logging артефактах.
 
-Network connections list protocol and port. Where a port is deployment-owned
-or external, the artifact records the configured value or the repository
-placeholder.
+Сетевые соединения указывают protocol и port. Если порт задается deployment
+платформой или внешней системой, артефакт фиксирует настроенное значение или
+placeholder из репозитория.
 
-## Sensitive Data Rule
+## Правило по чувствительным данным
 
-Artifacts do not contain live cookies, passwords, bearer tokens, private keys,
-customer certificates, certificate fingerprints, real customer hostnames or raw
-production payloads. Use env variable names and placeholders only.
+Артефакты не содержат live cookies, passwords, bearer tokens, private keys,
+customer certificates, certificate fingerprints, реальные customer hostnames
+или raw production payloads. Используются только имена env variables и
+placeholders.
 
-## Source Notes
+## Источники
 
-Source files inspected for this artifact set:
+При подготовке артефактов были сверены:
 
 - `README.md`
 - `docs/architecture/*`
