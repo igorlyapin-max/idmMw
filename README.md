@@ -90,9 +90,9 @@ docker compose -f docker-compose.monitoring.yml up -d
 
 ## Архитектура
 
-Архитектурные артефакты: C4-like views, runtime flows, deployment view,
-data/security view и ADR находятся в
-[docs/architecture/README.md](docs/architecture/README.md).
+Архитектурные артефакты: GKM AA set находится в [aa/README.md](aa/README.md),
+а C4-like views, runtime flows, deployment view, data/security view и ADR
+находятся в [docs/architecture/README.md](docs/architecture/README.md).
 
 ### Компоненты
 

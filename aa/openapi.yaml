@@ -1,0 +1,756 @@
+openapi: 3.0.3
+info:
+  title: idmMw HTTP API
+  version: 0.1.0
+  description: >
+    Repo-owned HTTP contracts for idmMw. Flow identifiers match
+    aa/information-model.md.
+servers:
+  - url: http://localhost:3010
+    description: Local/default HTTP listener
+  - url: https://localhost:3010
+    description: Local/default HTTPS listener when HTTP_TLS_ENABLED=true
+tags:
+  - name: Health
+  - name: IDM Webhook
+  - name: IDM Facade
+  - name: Admin
+  - name: Auth
+  - name: Metrics
+paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: Liveness and build identity
+      description: "Flow: IF-009"
+      responses:
+        "200":
+          description: Process is alive.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+  /about:
+    get:
+      tags: [Health]
+      summary: Safe build identity
+      description: "Flow: IF-009"
+      responses:
+        "200":
+          description: Build identity.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AboutResponse"
+  /ready:
+    get:
+      tags: [Health]
+      summary: Dependency readiness
+      description: "Flow: IF-009"
+      responses:
+        "200":
+          description: Dependencies are ready.
+          content:
+            application/json:
+              schema:
+                type: object
+        "503":
+          description: One or more dependencies are not ready.
+  /metrics:
+    get:
+      tags: [Metrics]
+      summary: Prometheus metrics
+      description: "Flow: IF-010. Protected by integration auth when METRICS_PUBLIC_ENABLED=false."
+      security:
+        - integrationHmac: []
+        - {}
+      responses:
+        "200":
+          description: Prometheus text exposition.
+          content:
+            text/plain:
+              schema:
+                type: string
+        "401":
+          description: Authentication required by deployment policy.
+  /webhooks/avanpost:
+    post:
+      tags: [IDM Webhook]
+      summary: Receive Avanpost-compatible event
+      description: "Flow: IF-001"
+      security:
+        - integrationHmac: []
+        - {}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AvanpostWebhook"
+      responses:
+        "201":
+          description: Event accepted and processed or queued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebhookResult"
+        "400":
+          description: Invalid payload or connector read error.
+        "404":
+          description: Target system not found.
+        "500":
+          description: Processing failed.
+  /idm/target-systems:
+    get:
+      tags: [IDM Facade]
+      summary: List enabled target systems for IDM
+      description: "Flow: IF-002. Does not return connector config or secrets."
+      security:
+        - integrationHmac: []
+        - {}
+      responses:
+        "200":
+          description: Enabled target systems catalog.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/IdmTargetSystem"
+  /idm/target-systems/{name}:
+    get:
+      tags: [IDM Facade]
+      summary: Get one target system catalog entry
+      description: "Flow: IF-002"
+      security:
+        - integrationHmac: []
+        - {}
+      parameters:
+        - $ref: "#/components/parameters/TargetSystemName"
+      responses:
+        "200":
+          description: Catalog entry.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IdmTargetSystem"
+        "404":
+          description: Target system not found or disabled.
+  /idm/{targetSystem}/test:
+    get:
+      tags: [IDM Facade]
+      summary: Test target system connection
+      description: "Flow: IF-002"
+      security:
+        - integrationHmac: []
+        - {}
+      parameters:
+        - $ref: "#/components/parameters/TargetSystem"
+      responses:
+        "200":
+          description: Connector-defined test result.
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          description: Connector failed.
+        "404":
+          description: Target system not found.
+  /idm/{targetSystem}/users:
+    get:
+      tags: [IDM Facade]
+      summary: Search users
+      description: "Flow: IF-002"
+      security:
+        - integrationHmac: []
+        - {}
+      parameters:
+        - $ref: "#/components/parameters/TargetSystem"
+        - name: filter
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 50
+      responses:
+        "200":
+          description: Connector-defined user list.
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          description: Invalid limit or connector failed.
+  /idm/{targetSystem}/users/resolve:
+    get:
+      tags: [IDM Facade]
+      summary: Resolve user by username, login or filter
+      description: "Flow: IF-002"
+      security:
+        - integrationHmac: []
+        - {}
+      parameters:
+        - $ref: "#/components/parameters/TargetSystem"
+        - name: username
+          in: query
+          schema:
+            type: string
+        - name: login
+          in: query
+          schema:
+            type: string
+        - name: filter
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Connector-defined user resolution result.
+          content:
+            application/json:
+              schema:
+                type: object
+  /idm/{targetSystem}/users/{id}:
+    get:
+      tags: [IDM Facade]
+      summary: Get user by id
+      description: "Flow: IF-002"
+      security:
+        - integrationHmac: []
+        - {}
+      parameters:
+        - $ref: "#/components/parameters/TargetSystem"
+        - $ref: "#/components/parameters/EntityId"
+      responses:
+        "200":
+          description: Connector-defined user result.
+          content:
+            application/json:
+              schema:
+                type: object
+  /idm/{targetSystem}/groups:
+    get:
+      tags: [IDM Facade]
+      summary: Search groups
+      description: "Flow: IF-002"
+      security:
+        - integrationHmac: []
+        - {}
+      parameters:
+        - $ref: "#/components/parameters/TargetSystem"
+        - name: filter
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 50
+      responses:
+        "200":
+          description: Connector-defined group list.
+          content:
+            application/json:
+              schema:
+                type: object
+  /idm/{targetSystem}/groups/{id}:
+    get:
+      tags: [IDM Facade]
+      summary: Get group by id
+      description: "Flow: IF-002"
+      security:
+        - integrationHmac: []
+        - {}
+      parameters:
+        - $ref: "#/components/parameters/TargetSystem"
+        - $ref: "#/components/parameters/EntityId"
+      responses:
+        "200":
+          description: Connector-defined group result.
+          content:
+            application/json:
+              schema:
+                type: object
+  /idm/{targetSystem}/schema:
+    get:
+      tags: [IDM Facade]
+      summary: Get connector schema
+      description: "Flow: IF-002"
+      security:
+        - integrationHmac: []
+        - {}
+      parameters:
+        - $ref: "#/components/parameters/TargetSystem"
+      responses:
+        "200":
+          description: Connector-defined schema.
+          content:
+            application/json:
+              schema:
+                type: object
+  /idm/{targetSystem}/sync:
+    post:
+      tags: [IDM Facade]
+      summary: Trigger connector sync
+      description: "Flow: IF-002"
+      security:
+        - integrationHmac: []
+        - {}
+      parameters:
+        - $ref: "#/components/parameters/TargetSystem"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                mode:
+                  type: string
+                  enum: [full, incremental]
+      responses:
+        "200":
+          description: Connector-defined sync result.
+          content:
+            application/json:
+              schema:
+                type: object
+  /auth/session:
+    get:
+      tags: [Auth]
+      summary: Current admin session status
+      description: "Flow: IF-003"
+      responses:
+        "200":
+          description: Session status.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionStatus"
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Local admin login
+      description: "Flow: IF-003"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                username:
+                  type: string
+                password:
+                  type: string
+                  format: password
+      responses:
+        "201":
+          description: Session status after login attempt.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionStatus"
+  /auth/sso-login:
+    post:
+      tags: [Auth]
+      summary: SSO admin login through trusted proxy headers
+      description: "Flow: IF-003"
+      responses:
+        "201":
+          description: Session status after SSO login attempt.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionStatus"
+  /auth/logout:
+    post:
+      tags: [Auth]
+      summary: Logout current admin session
+      description: "Flow: IF-003"
+      responses:
+        "201":
+          description: Logout result.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success]
+                properties:
+                  success:
+                    type: boolean
+                    enum: [true]
+  /admin/stats:
+    get:
+      tags: [Admin]
+      summary: Admin operational summary
+      description: "Flow: IF-003"
+      security:
+        - adminSession: []
+      responses:
+        "200":
+          description: DLQ and runtime summary.
+          content:
+            application/json:
+              schema:
+                type: object
+  /admin/dlq:
+    get:
+      tags: [Admin]
+      summary: List DLQ items
+      description: "Flow: IF-003"
+      security:
+        - adminSession: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+        - name: targetSystem
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+      responses:
+        "200":
+          description: DLQ page.
+          content:
+            application/json:
+              schema:
+                type: object
+  /admin/dlq/retry:
+    post:
+      tags: [Admin]
+      summary: Retry many DLQ items
+      description: "Flow: IF-003"
+      security:
+        - adminSession: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                targetSystem:
+                  type: string
+                status:
+                  type: string
+                limit:
+                  type: integer
+                  minimum: 1
+      responses:
+        "201":
+          description: Retry summary.
+          content:
+            application/json:
+              schema:
+                type: object
+  /admin/dlq/{id}/retry:
+    post:
+      tags: [Admin]
+      summary: Retry one DLQ item
+      description: "Flow: IF-003"
+      security:
+        - adminSession: []
+      parameters:
+        - $ref: "#/components/parameters/EntityId"
+      responses:
+        "201":
+          description: Retry accepted.
+  /admin/dlq/{id}/skip:
+    post:
+      tags: [Admin]
+      summary: Skip one DLQ item
+      description: "Flow: IF-003"
+      security:
+        - adminSession: []
+      parameters:
+        - $ref: "#/components/parameters/EntityId"
+      responses:
+        "201":
+          description: Item skipped.
+  /admin/target-systems:
+    get:
+      tags: [Admin]
+      summary: List target systems
+      description: "Flow: IF-003"
+      security:
+        - adminSession: []
+      responses:
+        "200":
+          description: Target system page.
+          content:
+            application/json:
+              schema:
+                type: object
+    post:
+      tags: [Admin]
+      summary: Create target system
+      description: "Flow: IF-003. Request may contain connector config; never log or expose secret values."
+      security:
+        - adminSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TargetSystemWrite"
+      responses:
+        "201":
+          description: Created target system.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TargetSystem"
+  /admin/target-systems/{id}:
+    get:
+      tags: [Admin]
+      summary: Get target system by id
+      description: "Flow: IF-003"
+      security:
+        - adminSession: []
+      parameters:
+        - $ref: "#/components/parameters/EntityId"
+      responses:
+        "200":
+          description: Target system.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TargetSystem"
+    patch:
+      tags: [Admin]
+      summary: Update target system
+      description: "Flow: IF-003"
+      security:
+        - adminSession: []
+      parameters:
+        - $ref: "#/components/parameters/EntityId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TargetSystemWrite"
+      responses:
+        "200":
+          description: Updated target system.
+    delete:
+      tags: [Admin]
+      summary: Delete target system
+      description: "Flow: IF-003"
+      security:
+        - adminSession: []
+      parameters:
+        - $ref: "#/components/parameters/EntityId"
+      responses:
+        "200":
+          description: Delete result.
+  /admin/target-systems/name/{name}:
+    get:
+      tags: [Admin]
+      summary: Get target system by name
+      description: "Flow: IF-003"
+      security:
+        - adminSession: []
+      parameters:
+        - $ref: "#/components/parameters/TargetSystemName"
+      responses:
+        "200":
+          description: Target system.
+  /admin/target-systems/{id}/test:
+    post:
+      tags: [Admin]
+      summary: Test target system connection
+      description: "Flow: IF-003 and IF-006"
+      security:
+        - adminSession: []
+      parameters:
+        - $ref: "#/components/parameters/EntityId"
+      responses:
+        "200":
+          description: Connector-defined test result.
+components:
+  securitySchemes:
+    adminSession:
+      type: apiKey
+      in: cookie
+      name: idmmw_admin_session
+    integrationHmac:
+      type: apiKey
+      in: header
+      name: x-idmmw-signature
+      description: Deployment-specific HMAC header when INTEGRATION_AUTH_ENABLED=true.
+  parameters:
+    TargetSystem:
+      name: targetSystem
+      in: path
+      required: true
+      schema:
+        type: string
+    TargetSystemName:
+      name: name
+      in: path
+      required: true
+      schema:
+        type: string
+    EntityId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+  schemas:
+    BuildIdentity:
+      type: object
+      required: [name, version, gitRevision, sourceClean, provenance, runtimeArtifactSha256]
+      properties:
+        name:
+          type: string
+          example: idmMw
+        version:
+          type: string
+        gitRevision:
+          type: string
+        sourceClean:
+          type: boolean
+        provenance:
+          type: string
+          enum: [verified, unverified-local, unknown]
+        runtimeArtifactSha256:
+          type: string
+    HealthResponse:
+      type: object
+      required: [status, build]
+      properties:
+        status:
+          type: string
+          enum: [ok]
+        build:
+          $ref: "#/components/schemas/BuildIdentity"
+    AboutResponse:
+      type: object
+      required: [name, build]
+      properties:
+        name:
+          type: string
+          enum: [idmMw]
+        build:
+          $ref: "#/components/schemas/BuildIdentity"
+    AvanpostWebhook:
+      type: object
+      required: [eventId, operation, targetSystem, payload]
+      properties:
+        eventId:
+          type: string
+        operation:
+          type: string
+        targetSystem:
+          type: string
+        payload:
+          type: object
+          properties:
+            data:
+              type: object
+            params:
+              type: object
+            metadata:
+              type: object
+          additionalProperties: true
+    WebhookResult:
+      type: object
+      required: [received, processed]
+      properties:
+        received:
+          type: boolean
+        processed:
+          type: boolean
+        data:
+          nullable: true
+    IdmTargetSystem:
+      type: object
+      required: [name, type, enabled, operations, readOperations, writeOperations, capabilities, operationStatus]
+      properties:
+        name:
+          type: string
+        type:
+          type: string
+        label:
+          type: string
+          nullable: true
+        enabled:
+          type: boolean
+        operations:
+          type: array
+          items:
+            type: string
+        readOperations:
+          type: array
+          items:
+            type: string
+        writeOperations:
+          type: array
+          items:
+            type: string
+        capabilities:
+          type: object
+        operationStatus:
+          type: object
+        partialOperations:
+          type: object
+          additionalProperties:
+            type: string
+    TargetSystemWrite:
+      type: object
+      required: [name, type]
+      properties:
+        name:
+          type: string
+        type:
+          type: string
+        label:
+          type: string
+        enabled:
+          type: boolean
+        config:
+          type: object
+          description: Connector configuration. May contain secret references or encrypted values.
+    TargetSystem:
+      allOf:
+        - $ref: "#/components/schemas/TargetSystemWrite"
+        - type: object
+          properties:
+            id:
+              type: string
+            createdAt:
+              type: string
+              format: date-time
+            updatedAt:
+              type: string
+              format: date-time
+    SessionStatus:
+      type: object
+      properties:
+        authenticated:
+          type: boolean
+        username:
+          type: string
+        mode:
+          type: string
