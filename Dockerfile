@@ -18,6 +18,7 @@ RUN set -eu; \
     exit 1; \
   fi; \
   rm -f "$ca_files"
+ENV NODE_EXTRA_CA_CERTS=/usr/local/share/ca-certificates/idmmw/customer-ca.crt
 
 FROM node-build-base AS backend-build
 
@@ -86,6 +87,7 @@ RUN set -eu; \
     exit 1; \
   fi; \
   rm -f "$ca_files"
+ENV NODE_EXTRA_CA_CERTS=/usr/local/share/ca-certificates/idmmw/customer-ca.crt
 
 WORKDIR /app
 
