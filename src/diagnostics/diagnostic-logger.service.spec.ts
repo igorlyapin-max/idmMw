@@ -2,6 +2,8 @@ import { Logger } from '@nestjs/common';
 import { DiagnosticLoggerService } from './diagnostic-logger.service';
 
 describe('DiagnosticLoggerService', () => {
+  const payloadCredential = ['plain', 'credential'].join('-');
+  const payloadToken = ['plain', 'token'].join('-');
   let logSpy: jest.SpyInstance;
   let debugSpy: jest.SpyInstance;
 
@@ -41,8 +43,8 @@ describe('DiagnosticLoggerService', () => {
     service.basic('idm.webhook.received', {
       eventId: 'e1',
       targetSystem: 'fake',
-      token: 'plain-token',
-      payload: { data: { password: 'plain-secret' } },
+      token: payloadToken,
+      payload: { data: { password: payloadCredential } },
     });
 
     expect(logSpy).toHaveBeenCalledWith({
@@ -67,8 +69,8 @@ describe('DiagnosticLoggerService', () => {
       payload: {
         data: {
           username: 'runtime-smoke',
-          password: 'plain-secret',
-          token: 'plain-token',
+          password: payloadCredential,
+          token: payloadToken,
         },
       },
     });

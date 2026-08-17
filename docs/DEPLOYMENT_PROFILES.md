@@ -94,7 +94,7 @@ Runtime contract:
 ```env
 DATABASE_PROVIDER=postgresql
 DATABASE_FLAVOR=postgresql
-DATABASE_URL=postgresql://idmmw:idmmw_dev@postgres:5432/idmmw
+DATABASE_URL=postgresql://idmmw:REPLACE_WITH_DEV_DB_CREDENTIAL@postgres:5432/idmmw
 LIGHTWEIGHT_MODE=false
 IDMMW_PROCESSING_MODE=sync
 KAFKA_ENABLED=false

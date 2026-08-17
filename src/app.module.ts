@@ -15,14 +15,11 @@ import { KafkaModule } from './kafka/kafka.module';
 import { AdminModule } from './admin/admin.module';
 import { MetricsModule } from './metrics/metrics.module';
 import { HttpMetricsMiddleware } from './metrics/http-metrics.middleware';
-import { applyPamCompatibility } from './secrets/legacy-compat';
 import { SecurityModule } from './security/security.module';
 import { AuthModule } from './auth/auth.module';
 import { AdminAuthMiddleware } from './auth/admin-auth.middleware';
 import { AdminUiModule } from './admin-ui/admin-ui.module';
 import { IntegrationAuthMiddleware } from './security/integration-auth.middleware';
-
-applyPamCompatibility();
 
 const isLightweight = process.env['LIGHTWEIGHT_MODE'] === 'true';
 const mockIdmEnabled =

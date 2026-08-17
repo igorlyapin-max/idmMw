@@ -23,7 +23,7 @@ restore_prisma_client() {
       DATABASE_URL="file:/tmp/idmmw-prisma-restore.db" npx prisma generate --schema=prisma/schema.sqlite.prisma >/dev/null 2>&1 || true
       ;;
     cockroachdb)
-      DATABASE_URL="postgresql://root@localhost:26257/defaultdb?sslmode=disable" npx prisma generate --schema=prisma/schema.cockroach.prisma >/dev/null 2>&1 || true
+      DATABASE_URL="postgresql://root@localhost:26257/defaultdb?sslmode=require" npx prisma generate --schema=prisma/schema.cockroach.prisma >/dev/null 2>&1 || true
       ;;
   esac
 }
@@ -33,12 +33,12 @@ case "$DB_FLAVOR" in
   yugabyte | yugabytedb)
     PROFILE="prod-ha-yugabyte"
     SCHEMA="prisma/schema.prisma"
-    DEFAULT_DATABASE_URL="postgresql://idmmw:idmmw@localhost:5432/idmmw"
+    DEFAULT_DATABASE_URL="postgresql://idmmw:REPLACE_WITH_LOCAL_DB_CREDENTIAL@localhost:5432/idmmw"
     ;;
   cockroach | cockroachdb)
     PROFILE="prod-ha-cockroach"
     SCHEMA="prisma/schema.cockroach.prisma"
-    DEFAULT_DATABASE_URL="postgresql://root@localhost:26257/defaultdb?sslmode=disable"
+    DEFAULT_DATABASE_URL="postgresql://root@localhost:26257/defaultdb?sslmode=require"
     ;;
   *)
     echo "Usage: $0 yugabyte|cockroach"
@@ -57,5 +57,10 @@ DATABASE_URL="${DATABASE_URL:-$DEFAULT_DATABASE_URL}" npx prisma generate --sche
 
 echo "[4/4] Building application with generated client"
 npm run build
+
+echo "[5/5] Validating production logging profile"
+COMPOSE_CONFIG_OUTPUT="$(docker compose -f deploy/docker-compose.prod-ha.yml --profile logging config)"
+printf '%s\n' "$COMPOSE_CONFIG_OUTPUT" | grep -q 'idmmw-log-forwarder:'
+printf '%s\n' "$COMPOSE_CONFIG_OUTPUT" | grep -q 'idmmw_logs:'
 
 echo "Production HA profile ${DB_FLAVOR} validated"

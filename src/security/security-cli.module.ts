@@ -5,11 +5,8 @@ import { appConfigSchema } from '../config/app.config';
 import { createPinoHttpConfig } from '../config/logging.config';
 import { PrismaModule } from '../database/prisma.module';
 import { SecretsModule } from '../secrets/secrets.module';
-import { applyPamCompatibility } from '../secrets/legacy-compat';
 import { SecurityModule } from './security.module';
 import { EncryptionRotationService } from './encryption-rotation.service';
-
-applyPamCompatibility();
 
 @Module({
   imports: [

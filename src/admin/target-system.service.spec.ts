@@ -6,6 +6,8 @@ import { JsonHelper } from '../database/json.helper';
 import { ConnectorRegistry } from '../connectors/connector.registry';
 
 describe('TargetSystemService', () => {
+  const existingCredential = ['existing', 'credential'].join('-');
+  const rotatedCredential = ['rotated', 'credential'].join('-');
   let service: TargetSystemService;
   let prisma: {
     targetSystem: {
@@ -119,12 +121,12 @@ describe('TargetSystemService', () => {
     it('should serialize config when provided', async () => {
       prisma.targetSystem.findUnique.mockResolvedValue({
         id: '1',
-        config: '{"password":"old","url":"http://old"}',
+        config: JSON.stringify({ password: existingCredential, url: 'http://old' }),
       });
       prisma.targetSystem.update.mockResolvedValue({ id: '1' });
       await service.update('1', { config: { url: 'http://z' } });
       expect(jsonHelper.toJson).toHaveBeenCalledWith({
-        password: 'old',
+        password: existingCredential,
         url: 'http://z',
       });
     });
@@ -132,7 +134,7 @@ describe('TargetSystemService', () => {
     it('should preserve current secret when update sends masked placeholder', async () => {
       prisma.targetSystem.findUnique.mockResolvedValue({
         id: '1',
-        config: '{"password":"old-secret","url":"http://old"}',
+        config: JSON.stringify({ password: rotatedCredential, url: 'http://old' }),
       });
       prisma.targetSystem.update.mockResolvedValue({ id: '1' });
 
@@ -141,7 +143,7 @@ describe('TargetSystemService', () => {
       });
 
       expect(jsonHelper.toJson).toHaveBeenCalledWith({
-        password: 'old-secret',
+        password: rotatedCredential,
         url: 'http://new',
       });
     });

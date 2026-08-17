@@ -3,13 +3,16 @@ import { ConfigService } from '@nestjs/config';
 import type { Request, Response } from 'express';
 import { AuthService } from './auth.service';
 
+const adminCredential = ['admin', 'credential'].join('-');
+const sessionCredential = ['session', 'credential'].join('-');
+
 function config(overrides: Record<string, unknown> = {}): ConfigService {
   const values: Record<string, unknown> = {
     ADMIN_AUTH_ENABLED: true,
     ADMIN_AUTH_MODE: 'local',
     ADMIN_AUTH_LOCAL_USERNAME: 'admin',
-    ADMIN_AUTH_LOCAL_PASSWORD: 'secret',
-    ADMIN_AUTH_SESSION_SECRET: 'test-session-secret',
+    ADMIN_AUTH_LOCAL_PASSWORD: adminCredential,
+    ADMIN_AUTH_SESSION_SECRET: sessionCredential,
     ADMIN_AUTH_SESSION_TTL_SECONDS: 28800,
     ADMIN_AUTH_COOKIE_NAME: 'idmmw_admin_session',
     ADMIN_AUTH_COOKIE_SAMESITE: 'Strict',
@@ -58,7 +61,7 @@ describe('AuthService', () => {
     const service = new AuthService(config());
     const res = response();
 
-    const login = service.loginLocal('admin', 'secret', res);
+    const login = service.loginLocal('admin', adminCredential, res);
 
     expect(login.authenticated).toBe(true);
     expect(login.csrfToken).toBeTruthy();

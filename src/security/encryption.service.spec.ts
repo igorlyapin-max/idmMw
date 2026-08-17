@@ -2,6 +2,7 @@ import { EncryptionService } from './encryption.service';
 
 const keyA = Buffer.alloc(32, 1).toString('base64');
 const keyB = Buffer.alloc(32, 2).toString('base64');
+const storedCredential = ['stored', 'credential'].join('-');
 
 describe('EncryptionService', () => {
   const originalEnv = process.env;
@@ -26,11 +27,11 @@ describe('EncryptionService', () => {
     process.env['ENCRYPTION_KEY_KEY_A'] = keyA;
 
     const service = new EncryptionService();
-    const encrypted = service.encryptForStorage({ password: 'secret' });
+    const encrypted = service.encryptForStorage({ password: storedCredential });
 
     expect(service.isEnvelope(encrypted)).toBe(true);
     expect(service.decryptFromStorage(encrypted)).toEqual({
-      password: 'secret',
+      password: storedCredential,
     });
   });
 

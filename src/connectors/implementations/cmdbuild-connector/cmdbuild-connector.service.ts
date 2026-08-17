@@ -1,7 +1,6 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { lastValueFrom } from 'rxjs';
-import { createHash } from 'crypto';
 import {
   Connector,
   ConnectorCapabilities,
@@ -14,6 +13,7 @@ import {
   TlsOptionsFactory,
 } from '../../../security/tls-options.factory';
 import { SECRET_REDACTION_CENSOR } from '../../../security/secret-redaction';
+import { fixedLengthFingerprint } from '../../../security/constant-time';
 
 export type CmdbuildAuthMode = 'session' | 'basic';
 
@@ -180,14 +180,12 @@ export class CmdbuildConnectorService implements Connector {
   }
 
   private sessionCacheKey(config: CmdbuildConfig): string {
-    const passwordFingerprint = createHash('sha256')
-      .update(config.password ?? '')
-      .digest('hex');
     return [
       config.baseUrl.replace(/\/+$/, ''),
       this.getApiPath(config),
       config.username,
-      passwordFingerprint,
+      this.normalizeAuthMode(config),
+      fixedLengthFingerprint(config.password ?? '', 'cmdbuild-session-cache'),
     ].join('|');
   }
 

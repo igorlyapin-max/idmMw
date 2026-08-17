@@ -1,7 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { createHash, createHmac, timingSafeEqual } from 'crypto';
+import { createHash, createHmac } from 'crypto';
 import type { Request } from 'express';
+import { safeEqualFixedLength } from './constant-time';
 
 export interface IntegrationAuthResult {
   ok: boolean;
@@ -191,9 +192,6 @@ export class IntegrationAuthService {
   }
 
   private safeEqual(a: string, b: string): boolean {
-    return timingSafeEqual(
-      createHash('sha256').update(a).digest(),
-      createHash('sha256').update(b).digest(),
-    );
+    return safeEqualFixedLength(a, b, 'integration-auth-signature');
   }
 }

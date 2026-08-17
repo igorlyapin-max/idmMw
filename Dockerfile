@@ -13,11 +13,13 @@ RUN set -eu; \
     if command -v update-ca-certificates >/dev/null 2>&1; then update-ca-certificates; fi; \
     if [ -f "$system_bundle" ]; then cat "$ca_bundle" >> "$system_bundle"; else cp "$ca_bundle" "$system_bundle"; fi; \
     if command -v npm >/dev/null 2>&1; then npm config set cafile "$system_bundle" --global; fi; \
-  elif [ "$CUSTOMER_CA_REQUIRED" = "true" ]; then \
-    echo "CUSTOMER_CA_REQUIRED=true but no certs/customer-ca/*.crt or *.pem was provided" >&2; \
-    exit 1; \
-  fi; \
-  rm -f "$ca_files"
+	  elif [ "$CUSTOMER_CA_REQUIRED" = "true" ]; then \
+	    echo "CUSTOMER_CA_REQUIRED=true but no certs/customer-ca/*.crt or *.pem was provided" >&2; \
+	    exit 1; \
+	  fi; \
+	  mkdir -p "$(dirname "$ca_bundle")"; \
+	  touch "$ca_bundle"; \
+	  rm -f "$ca_files"
 ENV NODE_EXTRA_CA_CERTS=/usr/local/share/ca-certificates/idmmw/customer-ca.crt
 
 FROM node-build-base AS backend-build
@@ -34,8 +36,8 @@ RUN npm ci --cache .npm --prefer-offline
 COPY prisma ./prisma
 RUN case "${PRISMA_SCHEMA}" in \
     *sqlite*) DATABASE_URL="file:/tmp/idmmw-build.db" npx prisma generate --schema="${PRISMA_SCHEMA}" ;; \
-    *cockroach*) DATABASE_URL="postgresql://root@localhost:26257/defaultdb?sslmode=disable" npx prisma generate --schema="${PRISMA_SCHEMA}" ;; \
-    *) DATABASE_URL="postgresql://idmmw:idmmw@localhost:5432/idmmw" npx prisma generate --schema="${PRISMA_SCHEMA}" ;; \
+    *cockroach*) DATABASE_URL="postgresql://root@localhost:26257/defaultdb?sslmode=require" npx prisma generate --schema="${PRISMA_SCHEMA}" ;; \
+    *) DATABASE_URL="postgresql://idmmw:REPLACE_WITH_LOCAL_DB_CREDENTIAL@localhost:5432/idmmw" npx prisma generate --schema="${PRISMA_SCHEMA}" ;; \
   esac
 
 COPY nest-cli.json tsconfig.json tsconfig.build.json ./
@@ -94,9 +96,14 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=3010
 
+RUN groupadd --system idmmw \
+  && useradd --system --gid idmmw --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin idmmw
+
 RUN apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates openssl \
   && if [ -s /usr/local/share/ca-certificates/idmmw/customer-ca.crt ]; then update-ca-certificates && cat /usr/local/share/ca-certificates/idmmw/customer-ca.crt >> /etc/ssl/certs/ca-certificates.crt; fi \
+  && mkdir -p /usr/local/share/ca-certificates/idmmw \
+  && touch /usr/local/share/ca-certificates/idmmw/customer-ca.crt \
   && rm -rf /var/lib/apt/lists/*
 
 COPY --from=backend-build /app/package.json /app/package-lock.json ./
@@ -111,7 +118,7 @@ RUN set -eu; \
   mkdir -p /app/build /app/data /app/logs; \
   actual_artifact_sha256="$(cd /app/ui/dist && find . -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | awk '{print $1}')"; \
   printf '%s\n' "$actual_artifact_sha256" > /app/build/runtime-artifact.sha256; \
-  chown -R node:node /app
+  chown -R idmmw:idmmw /app
 
 ARG APP_VERSION=0.0.0.0
 ARG GIT_REVISION=unknown
@@ -146,7 +153,7 @@ ENV BUILD_PROVENANCE=${BUILD_PROVENANCE}
 ENV RUNTIME_ARTIFACT_SHA256=${RUNTIME_ARTIFACT_SHA256}
 ENV IMAGE_CREATED=${IMAGE_CREATED}
 
-USER node
+USER idmmw
 
 EXPOSE 3010
 

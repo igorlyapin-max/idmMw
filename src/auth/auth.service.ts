@@ -1,8 +1,9 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { createHmac, randomBytes, timingSafeEqual, createHash } from 'crypto';
+import { createHmac, randomBytes } from 'crypto';
 import type { Request, Response } from 'express';
 import { isIpAllowed } from '../security/ip-utils';
+import { safeEqualFixedLength } from '../security/constant-time';
 
 export interface AdminUserSession {
   sub: string;
@@ -343,9 +344,7 @@ export class AuthService {
   }
 
   private safeEqual(a: string, b: string): boolean {
-    const left = createHash('sha256').update(a).digest();
-    const right = createHash('sha256').update(b).digest();
-    return timingSafeEqual(left, right);
+    return safeEqualFixedLength(a, b, 'auth-service');
   }
 
   private sessionStatusFromSession(session: AdminUserSession): SessionStatus {

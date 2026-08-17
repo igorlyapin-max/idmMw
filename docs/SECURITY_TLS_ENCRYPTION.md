@@ -32,8 +32,8 @@ ADMIN_UI_ENABLED=true
 ADMIN_AUTH_ENABLED=true
 ADMIN_AUTH_MODE=local
 ADMIN_AUTH_LOCAL_USERNAME=admin
-ADMIN_AUTH_LOCAL_PASSWORD=secret://idmmw-admin-password
-ADMIN_AUTH_SESSION_SECRET=secret://idmmw-admin-session-secret
+ADMIN_AUTH_LOCAL_PASSWORD=aapm://idmmw-admin-local-credential
+ADMIN_AUTH_SESSION_SECRET=aapm://idmmw-admin-session-credential
 ADMIN_AUTH_COOKIE_SECURE=true
 ```
 

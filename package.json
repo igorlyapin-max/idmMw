@@ -44,6 +44,8 @@
     "db:validate:cockroach": "prisma validate --schema=prisma/schema.cockroach.prisma",
     "db:studio": "prisma studio",
     "db:setup:sqlite": "cross-env DATABASE_PROVIDER=sqlite DATABASE_URL=file:./data/idmmw.db LIGHTWEIGHT_MODE=true prisma generate --schema=prisma/schema.sqlite.prisma && cross-env DATABASE_PROVIDER=sqlite DATABASE_URL=file:./data/idmmw.db LIGHTWEIGHT_MODE=true prisma db push --schema=prisma/schema.sqlite.prisma --skip-generate && cross-env DATABASE_PROVIDER=sqlite DATABASE_URL=file:./data/idmmw.db LIGHTWEIGHT_MODE=true prisma generate --schema=prisma/schema.sqlite.prisma",
+    "security:check-aspm": "node scripts/check-aspm-findings.mjs ../aspm/3.json",
+    "security:check-aspm:test": "node scripts/check-aspm-findings.test.mjs",
     "security:rotate-key": "ts-node -r tsconfig-paths/register src/security/rotate-encryption-key.cli.ts",
     "validate": "tsc --noEmit && npm run db:validate && npm run lint"
   },

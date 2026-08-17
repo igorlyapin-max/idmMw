@@ -121,7 +121,7 @@ case "$PROFILE" in
     require_value "$FILE" DebugLogging__Level Basic
     require_value "$FILE" LOG_SINK stdout
     require_value "$FILE" ENCRYPTION_ENABLED false
-    DATABASE_URL="${DATABASE_URL:-postgresql://idmmw:idmmw@localhost:5432/idmmw}" npx prisma validate --schema=prisma/schema.prisma
+    DATABASE_URL="${DATABASE_URL:-postgresql://idmmw:REPLACE_WITH_LOCAL_DB_CREDENTIAL@localhost:5432/idmmw}" npx prisma validate --schema=prisma/schema.prisma
     ;;
   prod-ha-yugabyte)
     require_value "$FILE" DATABASE_PROVIDER postgresql
@@ -140,7 +140,8 @@ case "$PROFILE" in
     require_value "$FILE" SECRETS_INDEEDPAMAAPM_TOKEN_TRANSPORT header
     require_value "$FILE" LOG_SINK file
     require_value "$FILE" LOG_FILE_PATH /app/logs/idmmw.log
-    DATABASE_URL="${DATABASE_URL:-postgresql://idmmw:idmmw@localhost:5432/idmmw}" npx prisma validate --schema=prisma/schema.prisma
+    require_value "$FILE" LOG_EXTERNAL_SINK compose-logging-profile
+    DATABASE_URL="${DATABASE_URL:-postgresql://idmmw:REPLACE_WITH_LOCAL_DB_CREDENTIAL@localhost:5432/idmmw}" npx prisma validate --schema=prisma/schema.prisma
     ;;
   prod-ha-cockroach)
     require_value "$FILE" DATABASE_PROVIDER postgresql
@@ -159,8 +160,9 @@ case "$PROFILE" in
     require_value "$FILE" SECRETS_INDEEDPAMAAPM_TOKEN_TRANSPORT header
     require_value "$FILE" LOG_SINK file
     require_value "$FILE" LOG_FILE_PATH /app/logs/idmmw.log
+    require_value "$FILE" LOG_EXTERNAL_SINK compose-logging-profile
     require_value "$FILE" PRISMA_SCHEMA prisma/schema.cockroach.prisma
-    DATABASE_URL="${DATABASE_URL:-postgresql://root@localhost:26257/defaultdb?sslmode=disable}" npx prisma validate --schema=prisma/schema.cockroach.prisma
+    DATABASE_URL="${DATABASE_URL:-postgresql://root@localhost:26257/defaultdb?sslmode=require}" npx prisma validate --schema=prisma/schema.cockroach.prisma
     ;;
 esac
 

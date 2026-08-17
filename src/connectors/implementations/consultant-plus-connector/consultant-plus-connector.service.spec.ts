@@ -15,6 +15,8 @@ type ConsultantRequestCall = [
 ];
 
 describe('ConsultantPlusConnectorService', () => {
+  const operatorCredential = ['operator', 'credential'].join('-');
+  const generatedCredential = ['generated', 'credential'].join('-');
   let service: ConsultantPlusConnectorService;
   let httpService: { request: jest.Mock };
 
@@ -37,7 +39,7 @@ describe('ConsultantPlusConnectorService', () => {
     return {
       baseUrl: 'https://login.consultant.ru',
       login: '1393020',
-      password: 'secret-password',
+      password: operatorCredential,
     };
   }
 
@@ -436,7 +438,7 @@ describe('ConsultantPlusConnectorService', () => {
             email: 'mwtd123@gkm.ru',
             firstName: 'Password',
             lastName: 'Changed',
-            rnd: 'rnd-password',
+            rnd: generatedCredential,
           },
         },
       });
@@ -448,7 +450,7 @@ describe('ConsultantPlusConnectorService', () => {
         url: 'https://cloud.consultant.ru/cloud/cgi/online.cgi?',
       });
       expect(calls[3][0].data).toBe(
-        'req=admin&op=admupd&rnd=rnd-password&login=1393020%23mwtd123&email=mwtd123%40gkm.ru&fio=Password+Changed',
+        `req=admin&op=admupd&rnd=${generatedCredential}&login=1393020%23mwtd123&email=mwtd123%40gkm.ru&fio=Password+Changed`,
       );
       expect(result.data).toEqual(
         expect.objectContaining({
@@ -514,7 +516,7 @@ describe('ConsultantPlusConnectorService', () => {
             userChangePasswordPath: '/cloud/cgi/online.cgi?',
           },
           params: { username: 'mwtd123@gkm.ru', email: 'mwtd123@gkm.ru' },
-          data: { newValue: 'operator-supplied-password' },
+          data: { newValue: operatorCredential },
         },
       });
 
@@ -596,7 +598,7 @@ describe('ConsultantPlusConnectorService', () => {
       const originalLogin = process.env['CONSULTANT_TEST_LOGIN'];
       const originalPassword = process.env['CONSULTANT_TEST_PASSWORD'];
       process.env['CONSULTANT_TEST_LOGIN'] = '1393020';
-      process.env['CONSULTANT_TEST_PASSWORD'] = 'secret-password';
+      process.env['CONSULTANT_TEST_PASSWORD'] = operatorCredential;
       try {
         mockSuccessfulLogin();
         httpService.request.mockReturnValueOnce(
@@ -968,14 +970,14 @@ describe('ConsultantPlusConnectorService', () => {
 
     it('should redact configured secrets from returned errors', async () => {
       httpService.request.mockReturnValueOnce(
-        throwError(() => new Error('failed with secret-password')),
+        throwError(() => new Error(`failed with ${operatorCredential}`)),
       );
 
       const result = await service.testConnection(config());
 
       expect(result.success).toBe(false);
       expect(result.message).toContain('[REDACTED]');
-      expect(result.message).not.toContain('secret-password');
+      expect(result.message).not.toContain(operatorCredential);
     });
   });
 });

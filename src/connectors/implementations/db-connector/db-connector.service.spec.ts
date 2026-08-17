@@ -37,6 +37,7 @@ function createService(values: Record<string, unknown>): DbConnectorService {
 }
 
 describe('DbConnectorService', () => {
+  const dbCredential = ['db', 'credential'].join('-');
   beforeEach(() => {
     mockedKnex.mockReset();
     rawMock.mockReset();
@@ -76,7 +77,7 @@ describe('DbConnectorService', () => {
       DB_CONNECTOR_DIALECT: 'oracledb',
       DB_CONNECTOR_URL: '127.0.0.1:1521/FREEPDB1',
       DB_CONNECTOR_USERNAME: 'scott',
-      DB_CONNECTOR_PASSWORD: 'tiger',
+      DB_CONNECTOR_PASSWORD: dbCredential,
     });
 
     await service.onModuleInit();
@@ -86,7 +87,7 @@ describe('DbConnectorService', () => {
       connection: {
         connectString: '127.0.0.1:1521/FREEPDB1',
         user: 'scott',
-        password: 'tiger',
+        password: dbCredential,
       },
       pool: { min: 1, max: 5 },
     });

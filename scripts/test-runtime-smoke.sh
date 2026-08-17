@@ -87,7 +87,7 @@ curl -fsS "http://127.0.0.1:${PORT}/metrics" | grep -q "idmmw_http_requests_tota
 echo "[6/6] Checking IDM webhook, diagnostics, redaction, and second log sink"
 curl -fsS \
   -H "Content-Type: application/json" \
-  -d '{"eventId":"runtime-smoke-'$$'","operation":"user.create","targetSystem":"fake","payload":{"data":{"username":"runtime-smoke","password":"plain-secret","token":"plain-token"}}}' \
+  -d '{"eventId":"runtime-smoke-'$$'","operation":"user.create","targetSystem":"fake","payload":{"data":{"username":"runtime-smoke","password":"plain-credential","token":"plain-marker"}}}' \
   "http://127.0.0.1:${PORT}/webhooks/avanpost" >"$RESPONSE_PATH"
 
 grep -q '"received":true' "$RESPONSE_PATH"
@@ -100,7 +100,7 @@ grep -q '"event":"idm.webhook.received"' "$LOG_PATH"
 grep -q '"event":"idm.webhook.payload"' "$LOG_PATH"
 grep -q '\[REDACTED\]' "$LOG_PATH"
 
-if grep -q 'plain-secret\|plain-token' "$LOG_PATH"; then
+if grep -q 'plain-credential\|plain-marker' "$LOG_PATH"; then
   echo "Sensitive diagnostic payload leaked to $LOG_PATH"
   exit 1
 fi

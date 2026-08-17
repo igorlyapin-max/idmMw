@@ -239,13 +239,13 @@ SECRETS_INDEEDPAMAAPM_DEFAULTACCOUNTPATH=default/path
 Examples of secret-backed runtime values:
 
 ```env
-ADMIN_AUTH_LOCAL_PASSWORD=secret://idmmw-admin-password
-ADMIN_AUTH_SESSION_SECRET=secret://idmmw-admin-session-secret
-ENCRYPTION_KEY_KEY_2026_06=secret://idmmw-encryption-key-2026-06
+ADMIN_AUTH_LOCAL_PASSWORD=aapm://idmmw-admin-local-credential
+ADMIN_AUTH_SESSION_SECRET=aapm://idmmw-admin-session-credential
+ENCRYPTION_KEY_KEY_2026_06=aapm://idmmw-encryption-key-2026-06
 ```
 
-`secret://...` must be the whole env value. Do not embed a `secret://` fragment
-inside `DATABASE_URL`. For the supplied `idmmw-migrate` one-shot service,
+`secret://...` and `aapm://...` must be the whole env value. Do not embed a
+secret reference fragment inside `DATABASE_URL`. For the supplied `idmmw-migrate` one-shot service,
 `DATABASE_URL` must already contain a resolved DSN because Prisma CLI does not
 run the application PAM resolver. Let the platform inject the final DSN before
 container startup, or render it from PAM outside the container. PAM bootstrap

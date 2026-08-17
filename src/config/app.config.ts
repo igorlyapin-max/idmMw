@@ -1,5 +1,13 @@
 import { z } from 'zod';
 
+const LEGACY_PAM_ENV_NAMES = [
+  'PAMURL',
+  'PAMTOKEN',
+  'PAMUSERNAME',
+  'PAMPASSWORD',
+  'PAMDEFAULTACCOUNTPATH',
+] as const;
+
 export const appConfigSchema = z
   .object({
     NODE_ENV: z
@@ -182,6 +190,9 @@ export const appConfigSchema = z
 
     LOG_SINK: z.enum(['stdout', 'file']).default('stdout'),
     LOG_FILE_PATH: z.string().default('/tmp/idmmw.log'),
+    LOG_EXTERNAL_SINK: z
+      .enum(['compose-logging-profile', 'platform-managed'])
+      .optional(),
     METRICS_PUBLIC_ENABLED: z
       .string()
       .transform((v) => v === 'true')
@@ -202,6 +213,17 @@ export const appConfigSchema = z
   })
   .passthrough()
   .superRefine((config, ctx) => {
+    for (const envName of LEGACY_PAM_ENV_NAMES) {
+      const value = config[envName];
+      if (typeof value === 'string' && value.trim()) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [envName],
+          message:
+            'Legacy PAM* environment variables are not supported. Use SECRETS_PROVIDER=IndeedPamAapm and SECRETS_INDEEDPAMAAPM_* instead.',
+        });
+      }
+    }
     if (config.IDMMW_PROCESSING_MODE === 'async' && !config.KAFKA_ENABLED) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,

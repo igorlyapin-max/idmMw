@@ -14,7 +14,7 @@ workflow:
     - if: '$CI_COMMIT_BRANCH'
 
 variables:
-  DATABASE_URL: 'postgresql://idmmw:idmmw@localhost:5432/idmmw'
+  DATABASE_URL: 'postgresql://idmmw:REPLACE_WITH_LOCAL_DB_CREDENTIAL@localhost:5432/idmmw'
   DATABASE_PROVIDER: 'postgresql'
   LIGHTWEIGHT_MODE: 'true'
   NPM_CONFIG_AUDIT: 'false'
@@ -45,10 +45,12 @@ backend:validate:
   extends: .backend_job
   stage: validate
   script:
-    - DATABASE_URL="postgresql://idmmw:idmmw@localhost:5432/idmmw" npx prisma validate --schema=prisma/schema.prisma
+    - DATABASE_URL="postgresql://idmmw:REPLACE_WITH_LOCAL_DB_CREDENTIAL@localhost:5432/idmmw" npx prisma validate --schema=prisma/schema.prisma
     - DATABASE_URL="file:/tmp/idmmw-ci-validate.db" npx prisma validate --schema=prisma/schema.sqlite.prisma
-    - DATABASE_URL="postgresql://root@localhost:26257/defaultdb?sslmode=disable" npx prisma validate --schema=prisma/schema.cockroach.prisma
-    - DATABASE_URL="postgresql://idmmw:idmmw@localhost:5432/idmmw" npx prisma generate --schema=prisma/schema.prisma
+    - DATABASE_URL="postgresql://root@localhost:26257/defaultdb?sslmode=require" npx prisma validate --schema=prisma/schema.cockroach.prisma
+    - DATABASE_URL="postgresql://idmmw:REPLACE_WITH_LOCAL_DB_CREDENTIAL@localhost:5432/idmmw" npx prisma generate --schema=prisma/schema.prisma
+    - npm run security:check-aspm:test
+    - if [ -f ../aspm/3.json ]; then npm run security:check-aspm; else echo "ASPM report ../aspm/3.json not found; remediation checker unit tests executed"; fi
     - npm run build
     - ./node_modules/.bin/eslint "src/**/*.ts"
 
@@ -56,7 +58,7 @@ backend:unit:
   extends: .backend_job
   stage: test
   script:
-    - DATABASE_URL="postgresql://idmmw:idmmw@localhost:5432/idmmw" npx prisma generate --schema=prisma/schema.prisma
+    - DATABASE_URL="postgresql://idmmw:REPLACE_WITH_LOCAL_DB_CREDENTIAL@localhost:5432/idmmw" npx prisma generate --schema=prisma/schema.prisma
     - npm test -- --runInBand
 
 backend:e2e:sqlite:

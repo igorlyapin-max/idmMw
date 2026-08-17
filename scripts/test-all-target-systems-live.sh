@@ -39,7 +39,7 @@ restore_prisma_client() {
       DATABASE_URL="file:/tmp/idmmw-prisma-restore.db" npx prisma generate --schema=prisma/schema.sqlite.prisma >/dev/null 2>&1 || true
       ;;
     cockroachdb)
-      DATABASE_URL="postgresql://root@localhost:26257/defaultdb?sslmode=disable" npx prisma generate --schema=prisma/schema.cockroach.prisma >/dev/null 2>&1 || true
+      DATABASE_URL="postgresql://root@localhost:26257/defaultdb?sslmode=require" npx prisma generate --schema=prisma/schema.cockroach.prisma >/dev/null 2>&1 || true
       ;;
   esac
 }

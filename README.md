@@ -368,6 +368,11 @@ State-changing запросы (`POST`, `PATCH`, `DELETE`) должны пере�
 `X-CSRF-Token` из `/auth/session` или ответа login. `/webhooks/avanpost` и
 `/idm/*` защищаются отдельным HMAC-контрактом при
 `INTEGRATION_AUTH_ENABLED=true`: `X-IDMMW-Timestamp` и `X-IDMMW-Signature`.
+Подпись считается как lowercase hex HMAC-SHA256 по canonical string
+`<timestamp>\n<METHOD>\n<path-without-query>\n<sha256-body>`. Тело перед
+подписью канонизируется как JSON с сортировкой ключей; пустое тело подписывается
+как пустая строка. Заголовок `X-IDMMW-Signature` может содержать чистый hex или
+префикс `sha256=`.
 `/metrics` публичен только при `METRICS_PUBLIC_ENABLED=true`.
 
 ## Mock IDM (dev/test)
@@ -568,16 +573,7 @@ CMDBUILD_PASSWORD=aapm://CMDBuild/ProdPass
 
 При старте приложения `SecretResolverService` автоматически резолвит ссылки через Indeed PAM AAPM API.
 
-### Legacy env vars (совместимость с ad2cmdb)
+### Legacy env vars
 
-Поддерживаются legacy переменные из ad2cmdb:
-
-```env
-PAMURL=https://pam.company.local
-PAMTOKEN=app-token
-PAMUSERNAME=app-user
-PAMPASSWORD=app-pass
-PAMDEFAULTACCOUNTPATH=default/path
-```
-
-Если любая из `PAM*` переменных установлена, `SECRETS_PROVIDER` автоматически устанавливается в `IndeedPamAapm`.
+Legacy переменные `PAM*` не поддерживаются. Используйте только canonical
+`SECRETS_INDEEDPAMAAPM_*` и явно задавайте `SECRETS_PROVIDER=IndeedPamAapm`.

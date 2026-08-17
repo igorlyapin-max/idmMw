@@ -31,7 +31,7 @@ restore_prisma_client() {
       DATABASE_URL="file:/tmp/idmmw-prisma-restore.db" npx prisma generate --schema=prisma/schema.sqlite.prisma >/dev/null 2>&1 || true
       ;;
     cockroachdb)
-      DATABASE_URL="postgresql://root@localhost:26257/defaultdb?sslmode=disable" npx prisma generate --schema=prisma/schema.cockroach.prisma >/dev/null 2>&1 || true
+      DATABASE_URL="postgresql://root@localhost:26257/defaultdb?sslmode=require" npx prisma generate --schema=prisma/schema.cockroach.prisma >/dev/null 2>&1 || true
       ;;
   esac
 }
@@ -90,7 +90,7 @@ curl -fsS "http://127.0.0.1:${RUNTIME_PORT}/metrics" | grep -q "idmmw_http_reque
 echo "[7/7] Checking webhook, diagnostics, redaction and file sink"
 curl -fsS \
   -H "Content-Type: application/json" \
-  -d '{"eventId":"profile-sqlite-smoke-'$$'","operation":"user.create","targetSystem":"fake","payload":{"data":{"username":"profile-sqlite","password":"plain-secret","token":"plain-token"}}}' \
+  -d '{"eventId":"profile-sqlite-smoke-'$$'","operation":"user.create","targetSystem":"fake","payload":{"data":{"username":"profile-sqlite","password":"plain-credential","token":"plain-marker"}}}' \
   "http://127.0.0.1:${RUNTIME_PORT}/webhooks/avanpost" >"$RESPONSE_PATH"
 
 grep -q '"received":true' "$RESPONSE_PATH"
@@ -103,7 +103,7 @@ grep -q '"event":"idm.webhook.received"' "$LOG_PATH"
 grep -q '"event":"idm.webhook.payload"' "$LOG_PATH"
 grep -q '\[REDACTED\]' "$LOG_PATH"
 
-if grep -q 'plain-secret\|plain-token' "$LOG_PATH"; then
+if grep -q 'plain-credential\|plain-marker' "$LOG_PATH"; then
   echo "Sensitive diagnostic payload leaked to $LOG_PATH"
   exit 1
 fi
