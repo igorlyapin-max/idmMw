@@ -8,13 +8,21 @@ import {
   type TargetSystem,
 } from '../api/client';
 
-const TYPE_OPTIONS = ['zabbix', 'cmdbuild', 'passwork', 'rest', 'db', 'fake'];
+const TYPE_OPTIONS = [
+  'zabbix',
+  'cmdbuild',
+  'passwork',
+  'consultant-plus',
+  'rest',
+  'db',
+  'fake',
+];
 
 interface ConfigField {
   name: string;
   label: string;
   help?: string;
-  inputType?: 'password' | 'text';
+  inputType?: 'password' | 'text' | 'json';
   placeholder?: string;
   defaultValue?: string;
   options?: Array<{ value: string; label: string }>;
@@ -166,6 +174,132 @@ const TYPE_FIELDS: Record<string, ConfigField[]> = {
       help: 'Passwork X-Response-Format header. Default is raw.',
     },
   ],
+  'consultant-plus': [
+    {
+      name: 'baseUrl',
+      label: 'Base URL',
+      placeholder: 'https://login.consultant.ru',
+      help: 'ConsultantPlus login/auth host.',
+    },
+    {
+      name: 'apiBaseUrl',
+      label: 'API base URL',
+      placeholder: 'https://cloud.consultant.ru',
+      help: 'Optional. Host used for the CGI endpoints once authenticated. Defaults to Base URL.',
+    },
+    {
+      name: 'loginEnv',
+      label: 'Operator login env var',
+      placeholder: 'CONSULTANT_OPERATOR_LOGIN',
+      help: 'Name of the environment variable on the idmMw server that holds the operator login. The value itself is set in server env, not here.',
+    },
+    {
+      name: 'passwordEnv',
+      label: 'Operator password env var',
+      placeholder: 'CONSULTANT_OPERATOR_PASSWORD',
+      help: 'Name of the environment variable on the idmMw server that holds the operator password.',
+    },
+    {
+      name: 'protectedOperatorLogin',
+      label: 'Protected operator login',
+      placeholder: '1393020',
+      help: 'Root operator login that the connector refuses to modify/delete. Defaults to 1393020.',
+    },
+    {
+      name: 'managedLoginPrefix',
+      label: 'Managed login prefix',
+      help: 'Optional prefix used when building managed logins, e.g. "1393020#".',
+    },
+    {
+      name: 'timeout',
+      label: 'Timeout ms',
+      help: 'Optional HTTP request timeout. Default is 30000.',
+    },
+    {
+      name: 'authPollAttempts',
+      label: 'Auth poll attempts',
+      help: 'Optional. How many times to poll /auth/?pid=... while logging in.',
+    },
+    {
+      name: 'userCreatePath',
+      label: 'Create: path',
+      placeholder: '/cloud/cgi/online.cgi?',
+      help: 'Required for user.create. Endpoint path (relative to API base URL) that performs account creation.',
+    },
+    {
+      name: 'userCreateMethod',
+      label: 'Create: HTTP method',
+      defaultValue: 'POST',
+      help: 'Defaults to POST.',
+    },
+    {
+      name: 'userCreateContentType',
+      label: 'Create: content type',
+      defaultValue: 'form',
+      options: [
+        { value: 'form', label: 'form' },
+        { value: 'json', label: 'json' },
+      ],
+    },
+    {
+      name: 'userCreatePayload',
+      label: 'Create: payload template (JSON)',
+      inputType: 'json',
+      placeholder:
+        '{\n  "req": "admin",\n  "op": "admadd",\n  "login": "${pureLogin}",\n  "email": "${email}",\n  "fio": "${fullName}"\n}',
+      help: 'Template body sent on user.create. Use ${field} placeholders resolved from the webhook payload.data.',
+    },
+    {
+      name: 'userUpdatePath',
+      label: 'Update: path',
+      help: 'Optional. Endpoint used for user.update.',
+    },
+    {
+      name: 'userUpdateContentType',
+      label: 'Update: content type',
+      defaultValue: 'form',
+      options: [
+        { value: 'form', label: 'form' },
+        { value: 'json', label: 'json' },
+      ],
+    },
+    {
+      name: 'userUpdatePayload',
+      label: 'Update: payload template (JSON)',
+      inputType: 'json',
+      help: 'Template body sent on user.update.',
+    },
+    {
+      name: 'userChangePasswordPath',
+      label: 'Change password: path',
+      help: 'Optional. Endpoint used for user.changePassword.',
+    },
+    {
+      name: 'userChangePasswordPayload',
+      label: 'Change password: payload template (JSON)',
+      inputType: 'json',
+    },
+    {
+      name: 'userBlockPath',
+      label: 'Block/disable: path',
+      help: 'Optional. Endpoint used for user.disable / user.lock.',
+    },
+    {
+      name: 'userBlockPayload',
+      label: 'Block/disable: payload template (JSON)',
+      inputType: 'json',
+    },
+    {
+      name: 'userDeletePath',
+      label: 'Delete: path',
+      help: 'Optional. Endpoint used for user.delete.',
+    },
+    {
+      name: 'userDeletePayload',
+      label: 'Delete: payload template (JSON)',
+      inputType: 'json',
+    },
+  ],
   rest: [{ name: 'baseUrl', label: 'Base URL' }],
   db: [
     { name: 'client', label: 'Dialect (pg | mysql2 | sqlite3 | oracledb)' },
@@ -233,9 +367,18 @@ function buildConfig(form: TargetSystemForm): Record<string, unknown> {
     ) {
       return;
     }
-    if (value !== undefined && value !== '') {
-      cfg[field.name] = value;
+    if (value === undefined || value === '') {
+      return;
     }
+    if (field.inputType === 'json') {
+      try {
+        cfg[field.name] = JSON.parse(value);
+      } catch {
+        // Leave invalid JSON out rather than sending a broken payload template.
+      }
+      return;
+    }
+    cfg[field.name] = value;
   });
 
   const retryPolicy = buildRetryPolicy(form.retryPolicy);
@@ -384,14 +527,23 @@ export function TargetSystemsPage() {
     const configValues: Record<string, string> = {};
     const extraConfig: Record<string, unknown> = {};
 
+    const fieldByName = new Map(
+      (TYPE_FIELDS[item.type] ?? []).map((f) => [f.name, f]),
+    );
+
     Object.entries(rawConfig).forEach(([key, value]) => {
       if (key === 'retryPolicy') {
         return;
       }
       if (fieldNames.has(key)) {
+        if (isSecretConfigKey(key) && isMaskedSecretPlaceholder(value)) {
+          configValues[key] = '';
+          return;
+        }
+        const field = fieldByName.get(key);
         configValues[key] =
-          isSecretConfigKey(key) && isMaskedSecretPlaceholder(value)
-            ? ''
+          field?.inputType === 'json'
+            ? JSON.stringify(value, null, 2)
             : String(value ?? '');
       } else {
         extraConfig[key] = value;
@@ -536,6 +688,22 @@ export function TargetSystemsPage() {
                       </option>
                     ))}
                   </select>
+                ) : field.inputType === 'json' ? (
+                  <textarea
+                    className="mono"
+                    rows={5}
+                    placeholder={field.placeholder}
+                    value={form.configValues[field.name] ?? ''}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        configValues: {
+                          ...form.configValues,
+                          [field.name]: e.target.value,
+                        },
+                      })
+                    }
+                  />
                 ) : (
                   <input
                     type={field.inputType ?? 'text'}
