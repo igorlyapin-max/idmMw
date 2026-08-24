@@ -52,8 +52,11 @@ ENV NPM_CONFIG_AUDIT=false
 ENV NPM_CONFIG_FUND=false
 
 COPY VERSION /app/VERSION
+COPY scripts/check-vite-build-prereqs.mjs /app/scripts/check-vite-build-prereqs.mjs
 COPY ui/package.json ui/package-lock.json ./
 RUN npm ci --cache .npm --prefer-offline
+COPY ui/vite.config.ts ./
+RUN node /app/scripts/check-vite-build-prereqs.mjs /app/ui admin-ui
 COPY ui ./
 RUN npm run build
 
@@ -64,7 +67,10 @@ ENV NPM_CONFIG_AUDIT=false
 ENV NPM_CONFIG_FUND=false
 
 COPY idm-emulator/package.json idm-emulator/package-lock.json ./
+COPY scripts/check-vite-build-prereqs.mjs /app/scripts/check-vite-build-prereqs.mjs
 RUN npm ci --cache .npm --prefer-offline
+COPY idm-emulator/vite.config.ts ./
+RUN node /app/scripts/check-vite-build-prereqs.mjs /app/idm-emulator idm-emulator
 COPY idm-emulator ./
 RUN npm run build
 

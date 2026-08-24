@@ -62,6 +62,19 @@ timestamped phase markers for preflight, Docker build, digest extraction,
 runtime smoke and push; use those markers to identify slow registry, mirror or
 dependency phases.
 
+The Admin UI and IDM emulator use Vite with `build.cssMinify=esbuild` so CSS
+minification does not require the optional native `lightningcss-*` package.
+The Docker build still runs a Vite preflight after `npm ci`; if the corporate
+npm mirror or proxy omits required native build packages such as
+`@rolldown/binding-linux-x64-gnu`, the preflight fails before `npm run build`
+with a direct dependency diagnostic.
+
+If a build fails with
+`Cannot find module '../lightningcss.linux-x64-gnu.node'`, verify that the
+checkout contains the Vite config change above. On older revisions without that
+change, the customer npm mirror must serve `lightningcss-linux-x64-gnu` as an
+optional dependency for Debian/glibc x64 builds.
+
 ```bash
 bash scripts/build-verified-image.sh \
   --profile dev-sqlite \

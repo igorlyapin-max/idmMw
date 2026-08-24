@@ -26,6 +26,9 @@ export function readAppVersion(
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
+  build: {
+    cssMinify: 'esbuild',
+  },
   define: {
     __APP_VERSION__: JSON.stringify(readAppVersion()),
   },
