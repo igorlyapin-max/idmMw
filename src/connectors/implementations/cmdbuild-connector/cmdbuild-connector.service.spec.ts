@@ -4,6 +4,7 @@ import { of, throwError } from 'rxjs';
 import { CmdbuildConnectorService } from './cmdbuild-connector.service';
 import { AVANPOST_OPERATION_VALUES } from '../../../inbound/webhooks/avanpost-operation.enum';
 import { SECRET_REDACTION_CENSOR } from '../../../security/secret-redaction';
+import { DiagnosticLoggerService } from '../../../diagnostics/diagnostic-logger.service';
 
 const BASIC_CMDBUILD_CONFIG = {
   baseUrl: 'http://c',
@@ -156,14 +157,17 @@ const cmdbuildRequestMatrix: Array<{
 describe('CmdbuildConnectorService', () => {
   let service: CmdbuildConnectorService;
   let httpService: { request: jest.Mock; get: jest.Mock };
+  let diagnostics: { basic: jest.Mock; verbose: jest.Mock };
 
   beforeEach(async () => {
     httpService = { request: jest.fn(), get: jest.fn() };
+    diagnostics = { basic: jest.fn(), verbose: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         CmdbuildConnectorService,
         { provide: HttpService, useValue: httpService },
+        { provide: DiagnosticLoggerService, useValue: diagnostics },
       ],
     }).compile();
 
@@ -281,6 +285,43 @@ describe('CmdbuildConnectorService', () => {
       );
     });
 
+    it('should log diagnostics with safe paths without query filters', async () => {
+      httpService.request.mockReturnValue(
+        of({ data: { data: { ok: true } }, status: 200 }),
+      );
+
+      const result = await service.execute({
+        operation: 'user.search',
+        targetSystem: 'cmdbuild',
+        payload: {
+          config: BASIC_CMDBUILD_CONFIG,
+          params: { filter: 'sensitive-user' },
+        },
+      });
+
+      expect(result.success).toBe(true);
+      expect(diagnostics.verbose).toHaveBeenCalledWith(
+        'cmdbuild.request',
+        expect.objectContaining({
+          path: '/users',
+          targetSystem: 'cmdbuild',
+        }),
+      );
+      expect(diagnostics.basic).toHaveBeenCalledWith(
+        'cmdbuild.request.success',
+        expect.objectContaining({
+          path: '/users',
+          targetSystem: 'cmdbuild',
+        }),
+      );
+      expect(JSON.stringify(diagnostics.verbose.mock.calls)).not.toContain(
+        'sensitive-user',
+      );
+      expect(JSON.stringify(diagnostics.basic.mock.calls)).not.toContain(
+        'sensitive-user',
+      );
+    });
+
     it('should not reuse cached CMDBuild session after credential rotation', async () => {
       const rotatedCredential = ['rotated', 'credential'].join('-');
       httpService.request
@@ -305,37 +346,45 @@ describe('CmdbuildConnectorService', () => {
         expect(result.success).toBe(true);
       }
 
-      const authCalls = httpService.request.mock.calls.filter((call) => {
-        const request = call[0] as { method?: unknown; url?: unknown };
+      const requestCalls = httpService.request.mock.calls as Array<
+        [
+          {
+            method?: unknown;
+            url?: unknown;
+            data?: unknown;
+            headers?: unknown;
+          },
+        ]
+      >;
+      const authCalls = requestCalls.filter((call) => {
+        const request = call[0];
         return (
           request.method === 'POST' && String(request.url).includes('/sessions')
         );
       });
+      const firstAuthRequest = authCalls[0]?.[0];
+      const secondAuthRequest = authCalls[1]?.[0];
       expect(authCalls).toHaveLength(2);
-      expect(authCalls[0][0]).toEqual(
+      expect(firstAuthRequest).toEqual(
         expect.objectContaining({
           data: { username: 'u', password: sessionCredential },
         }),
       );
-      expect(authCalls[1][0]).toEqual(
+      expect(secondAuthRequest).toEqual(
         expect.objectContaining({
           data: { username: 'u', password: rotatedCredential },
         }),
       );
-      expect(httpService.request).toHaveBeenNthCalledWith(
-        2,
+      const firstDataRequest = requestCalls[1]?.[0];
+      const secondDataRequest = requestCalls[3]?.[0];
+      expect(firstDataRequest?.headers).toEqual(
         expect.objectContaining({
-          headers: expect.objectContaining({
-            'Cmdbuild-Authorization': 'session-1',
-          }),
+          'Cmdbuild-Authorization': 'session-1',
         }),
       );
-      expect(httpService.request).toHaveBeenNthCalledWith(
-        4,
+      expect(secondDataRequest?.headers).toEqual(
         expect.objectContaining({
-          headers: expect.objectContaining({
-            'Cmdbuild-Authorization': 'session-2',
-          }),
+          'Cmdbuild-Authorization': 'session-2',
         }),
       );
     });

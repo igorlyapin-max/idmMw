@@ -1,5 +1,6 @@
 import { Logger } from '@nestjs/common';
 import { DiagnosticLoggerService } from './diagnostic-logger.service';
+import { RuntimeDiagnosticsService } from './runtime-diagnostics.service';
 
 describe('DiagnosticLoggerService', () => {
   const payloadCredential = ['plain', 'credential'].join('-');
@@ -19,9 +20,12 @@ describe('DiagnosticLoggerService', () => {
   function createService(
     values: Record<string, boolean | string | undefined>,
   ): DiagnosticLoggerService {
-    return new DiagnosticLoggerService({
-      get: (key: string) => values[key],
-    } as never);
+    return new DiagnosticLoggerService(
+      {
+        get: (key: string) => values[key],
+      } as never,
+      new RuntimeDiagnosticsService(),
+    );
   }
 
   it('does not emit diagnostic events when disabled', () => {
@@ -75,7 +79,7 @@ describe('DiagnosticLoggerService', () => {
       },
     });
 
-    expect(debugSpy).toHaveBeenCalledWith({
+    expect(logSpy).toHaveBeenCalledWith({
       diagnostic: true,
       diagnosticLevel: 'Verbose',
       event: 'idm.webhook.payload',
@@ -87,5 +91,55 @@ describe('DiagnosticLoggerService', () => {
         },
       },
     });
+    expect(debugSpy).not.toHaveBeenCalled();
+  });
+
+  it('enables Verbose through runtime override for a target system', () => {
+    const runtimeDiagnostics = new RuntimeDiagnosticsService();
+    runtimeDiagnostics.enable({
+      targetSystem: 'CMDB',
+      level: 'Verbose',
+      ttlSeconds: 300,
+    });
+    const service = new DiagnosticLoggerService(
+      {
+        get: () => false,
+      } as never,
+      runtimeDiagnostics,
+    );
+
+    service.verbose('cmdbuild.request', {
+      targetSystem: 'CMDB',
+      payload: { password: payloadCredential },
+    });
+
+    expect(logSpy).toHaveBeenCalledWith({
+      diagnostic: true,
+      diagnosticLevel: 'Verbose',
+      event: 'cmdbuild.request',
+      targetSystem: 'CMDB',
+      payload: { password: '[REDACTED]' },
+    });
+  });
+
+  it('does not apply target-scoped runtime override to unscoped events', () => {
+    const runtimeDiagnostics = new RuntimeDiagnosticsService();
+    runtimeDiagnostics.enable({
+      targetSystem: 'CMDB',
+      level: 'Verbose',
+      ttlSeconds: 300,
+    });
+    const service = new DiagnosticLoggerService(
+      {
+        get: () => false,
+      } as never,
+      runtimeDiagnostics,
+    );
+
+    service.verbose('startup.runtime', {
+      payload: { password: payloadCredential },
+    });
+
+    expect(logSpy).not.toHaveBeenCalled();
   });
 });

@@ -1,4 +1,9 @@
-import { Module, MiddlewareConsumer, NestModule } from '@nestjs/common';
+import {
+  Module,
+  MiddlewareConsumer,
+  NestModule,
+  RequestMethod,
+} from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ServeStaticModule } from '@nestjs/serve-static';
 import { join } from 'path';
@@ -106,6 +111,6 @@ export class AppModule implements NestModule {
         IntegrationAuthMiddleware,
         AdminAuthMiddleware,
       )
-      .forRoutes('*');
+      .forRoutes({ path: '*path', method: RequestMethod.ALL });
   }
 }

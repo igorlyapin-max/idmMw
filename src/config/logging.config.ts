@@ -1,5 +1,6 @@
 import pino, { type DestinationStream } from 'pino';
 import type { Options } from 'pino-http';
+import { createLogBufferStream } from '../diagnostics/log-buffer';
 
 export type DebugLoggingLevel = 'Basic' | 'Verbose';
 
@@ -147,21 +148,21 @@ export function createPinoHttpConfig(): Options | [Options, DestinationStream] {
         : undefined,
   };
 
-  if (cfg.logSink !== 'file') {
-    return options;
-  }
-
-  const stream = pino.multistream([
+  const streams = [
     { level: cfg.pinoLevel, stream: pino.destination(1) },
-    {
+    { level: 'debug', stream: createLogBufferStream() },
+  ];
+
+  if (cfg.logSink === 'file') {
+    streams.push({
       level: cfg.pinoLevel,
       stream: pino.destination({
         dest: cfg.logFilePath,
         sync: false,
         mkdir: true,
       }),
-    },
-  ]);
+    });
+  }
 
-  return [{ ...options, transport: undefined }, stream];
+  return [{ ...options, transport: undefined }, pino.multistream(streams)];
 }

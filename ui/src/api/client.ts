@@ -250,3 +250,57 @@ export async function testTargetSystemConnection(id: string): Promise<{
   const res = await apiClient.post(`/admin/target-systems/${id}/test`);
   return res.data as { success: boolean; message: string };
 }
+
+export interface RuntimeDebugSession {
+  id: string;
+  enabled: boolean;
+  level: 'Basic' | 'Verbose';
+  targetSystem?: string;
+  createdAt: string;
+  expiresAt: string;
+}
+
+export interface RuntimeLogEvent {
+  id: number;
+  time: number;
+  level: number | string;
+  msg?: string;
+  event?: string;
+  diagnostic?: boolean;
+  diagnosticLevel?: string;
+  targetSystem?: string;
+  context?: string;
+  method?: string;
+  path?: string;
+  status?: number;
+  responseTime?: number;
+}
+
+export async function fetchRuntimeDebugStatus(): Promise<{
+  active: RuntimeDebugSession[];
+}> {
+  const res = await apiClient.get('/admin/runtime/debug');
+  return res.data as { active: RuntimeDebugSession[] };
+}
+
+export async function enableRuntimeDebug(data: {
+  targetSystem: string;
+  level: 'Basic' | 'Verbose';
+  ttlSeconds: number;
+}): Promise<RuntimeDebugSession> {
+  const res = await apiClient.post('/admin/runtime/debug', data);
+  return res.data as RuntimeDebugSession;
+}
+
+export async function disableRuntimeDebug(id: string): Promise<void> {
+  await apiClient.delete(`/admin/runtime/debug/${id}`);
+}
+
+export async function fetchRuntimeLogs(params: {
+  targetSystem: string;
+  level?: string;
+  limit?: number;
+}): Promise<RuntimeLogEvent[]> {
+  const res = await apiClient.get('/admin/runtime/logs', { params });
+  return (res.data as { items: RuntimeLogEvent[] }).items;
+}

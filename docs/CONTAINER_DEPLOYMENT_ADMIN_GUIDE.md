@@ -278,6 +278,21 @@ injected by the platform and cannot be resolved through the same PAM resolver.
   platform log route picks up the file.
 - Production HA examples use `LOG_SINK=file`, `/app/logs/idmmw.log` and the
   `logging` compose profile sidecar as the second operational delivery route.
+- Admin UI provides a temporary runtime debug control on `Target Systems` rows.
+  It creates an in-memory debug session for the selected `TargetSystem.name`
+  with `Basic` or `Verbose` level and a bounded TTL. The setting is
+  process-local, does not modify `.env`, and is lost on container restart.
+- The `Target Systems -> Logs` action shows the current process ring buffer for
+  the selected target system. It is intended for incident triage and does not
+  replace `docker compose logs`, `LOG_SINK=file`, a collector, syslog, Kafka log
+  topic, ELK/OpenSearch route or another operational sink. The Admin API returns
+  only the safe log view (`id`, `time`, `level`, `msg`, `event`, `diagnostic`,
+  `diagnosticLevel`, `targetSystem`, `context`, `method`, `path`, `status`,
+  `responseTime`); raw records, headers, query strings, payloads and configs are
+  not exposed through this endpoint.
+- `Verbose` debug from Admin UI follows the same redaction policy as
+  `DebugLogging__Level=Verbose`: secrets, auth headers, cookies, passwords,
+  tokens and private key material must not appear in UI log responses.
 
 ## Verified image identity
 

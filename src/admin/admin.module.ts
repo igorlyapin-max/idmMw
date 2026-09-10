@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { AdminController } from './admin.controller';
+import { RuntimeDiagnosticsController } from './runtime-diagnostics.controller';
 import { AdminService } from './admin.service';
 import { TargetSystemController } from './target-system.controller';
 import { TargetSystemService } from './target-system.service';
@@ -11,7 +12,12 @@ import { ConnectorsModule } from '../connectors/connectors.module';
 
 @Module({
   imports: [CoreModule, KafkaModule, MetricsModule, ConnectorsModule],
-  controllers: [AdminController, TargetSystemController, IdmController],
+  controllers: [
+    AdminController,
+    RuntimeDiagnosticsController,
+    TargetSystemController,
+    IdmController,
+  ],
   providers: [AdminService, TargetSystemService],
 })
 export class AdminModule {}

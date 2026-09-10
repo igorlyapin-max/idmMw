@@ -10,6 +10,8 @@ DB_URL="file:${DB_PATH}"
 LOG_PATH="${IDMMW_SMOKE_LOG_PATH:-/tmp/idmmw-smoke-$$.log}"
 STDOUT_PATH="${IDMMW_SMOKE_STDOUT_PATH:-/tmp/idmmw-smoke-stdout-$$.log}"
 RESPONSE_PATH="${IDMMW_SMOKE_RESPONSE_PATH:-/tmp/idmmw-smoke-response-$$.json}"
+DEBUG_RESPONSE_PATH="${IDMMW_SMOKE_DEBUG_RESPONSE_PATH:-/tmp/idmmw-smoke-debug-response-$$.json}"
+LOGS_RESPONSE_PATH="${IDMMW_SMOKE_LOGS_RESPONSE_PATH:-/tmp/idmmw-smoke-logs-response-$$.json}"
 APP_PID=""
 CURRENT_PROVIDER=""
 
@@ -36,7 +38,7 @@ cleanup() {
     kill "$APP_PID" >/dev/null 2>&1 || true
     wait "$APP_PID" >/dev/null 2>&1 || true
   fi
-  rm -f "$DB_PATH" "${DB_PATH}-journal" "$LOG_PATH" "$STDOUT_PATH" "$RESPONSE_PATH"
+  rm -f "$DB_PATH" "${DB_PATH}-journal" "$LOG_PATH" "$STDOUT_PATH" "$RESPONSE_PATH" "$DEBUG_RESPONSE_PATH" "$LOGS_RESPONSE_PATH"
   restore_prisma_client
 }
 trap cleanup EXIT INT TERM
@@ -93,7 +95,29 @@ curl -fsS \
 grep -q '"received":true' "$RESPONSE_PATH"
 grep -q '"processed":true' "$RESPONSE_PATH"
 
+curl -fsS \
+  -H "Content-Type: application/json" \
+  -d '{"targetSystem":"fake","level":"Verbose","ttlSeconds":60}' \
+  "http://127.0.0.1:${PORT}/admin/runtime/debug" >"$DEBUG_RESPONSE_PATH"
+grep -q '"targetSystem":"fake"' "$DEBUG_RESPONSE_PATH"
+grep -q '"level":"Verbose"' "$DEBUG_RESPONSE_PATH"
+
 sleep 0.5
+
+curl -fsS \
+  "http://127.0.0.1:${PORT}/admin/runtime/logs?targetSystem=fake&limit=abc" >"$LOGS_RESPONSE_PATH"
+grep -q '"items":' "$LOGS_RESPONSE_PATH"
+grep -q '"event":"idm.webhook.received"' "$LOGS_RESPONSE_PATH"
+
+if grep -q '"raw"\|"headers"\|"query"\|"params"\|"payload"\|"data"\|"config"' "$LOGS_RESPONSE_PATH"; then
+  echo "Unsafe raw diagnostic fields leaked to $LOGS_RESPONSE_PATH"
+  exit 1
+fi
+
+if grep -q 'plain-credential\|plain-marker\|Authorization\|Cookie' "$LOGS_RESPONSE_PATH"; then
+  echo "Sensitive diagnostic payload leaked to $LOGS_RESPONSE_PATH"
+  exit 1
+fi
 
 grep -q '"event":"startup.runtime"' "$LOG_PATH"
 grep -q '"event":"idm.webhook.received"' "$LOG_PATH"

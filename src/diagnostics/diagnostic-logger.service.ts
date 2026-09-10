@@ -5,15 +5,20 @@ import {
   SECRET_REDACTION_CENSOR,
   isSecretKey,
 } from '../security/secret-redaction';
+import { RuntimeDiagnosticsService } from './runtime-diagnostics.service';
 
 @Injectable()
 export class DiagnosticLoggerService {
   private readonly logger = new Logger(DiagnosticLoggerService.name);
 
-  constructor(private readonly config: ConfigService) {}
+  constructor(
+    private readonly config: ConfigService,
+    private readonly runtimeDiagnostics: RuntimeDiagnosticsService,
+  ) {}
 
   basic(event: string, fields: Record<string, unknown> = {}): void {
-    if (!this.enabled()) return;
+    const targetSystem = this.targetSystem(fields);
+    if (!this.enabled(targetSystem)) return;
     this.logger.log({
       diagnostic: true,
       diagnosticLevel: 'Basic',
@@ -23,8 +28,11 @@ export class DiagnosticLoggerService {
   }
 
   verbose(event: string, fields: Record<string, unknown> = {}): void {
-    if (!this.enabled() || this.level() !== 'Verbose') return;
-    this.logger.debug({
+    const targetSystem = this.targetSystem(fields);
+    if (!this.enabled(targetSystem) || this.level(targetSystem) !== 'Verbose') {
+      return;
+    }
+    this.logger.log({
       diagnostic: true,
       diagnosticLevel: 'Verbose',
       event,
@@ -32,22 +40,32 @@ export class DiagnosticLoggerService {
     });
   }
 
-  isEnabled(): boolean {
-    return this.enabled();
+  isEnabled(targetSystem?: string): boolean {
+    return this.enabled(targetSystem);
   }
 
-  level(): DebugLoggingLevel {
+  level(targetSystem?: string): DebugLoggingLevel {
+    if (this.runtimeDiagnostics.isEnabled(targetSystem)) {
+      return this.runtimeDiagnostics.level(targetSystem);
+    }
     const value =
       this.config.get<string>('DebugLogging__Level') ??
       this.config.get<string>('DEBUG_LOGGING_LEVEL');
     return value === 'Verbose' ? 'Verbose' : 'Basic';
   }
 
-  private enabled(): boolean {
+  private enabled(targetSystem?: string): boolean {
     return (
+      this.runtimeDiagnostics.isEnabled(targetSystem) ||
       (this.config.get<boolean>('DebugLogging__Enabled') ?? false) ||
       (this.config.get<boolean>('DEBUG_LOGGING_ENABLED') ?? false)
     );
+  }
+
+  private targetSystem(fields: Record<string, unknown>): string | undefined {
+    return typeof fields['targetSystem'] === 'string'
+      ? fields['targetSystem']
+      : undefined;
   }
 
   private redactRecord(

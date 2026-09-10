@@ -14,6 +14,7 @@ import {
 } from '../../../security/tls-options.factory';
 import { SECRET_REDACTION_CENSOR } from '../../../security/secret-redaction';
 import { fixedLengthFingerprint } from '../../../security/constant-time';
+import { DiagnosticLoggerService } from '../../../diagnostics/diagnostic-logger.service';
 
 export type CmdbuildAuthMode = 'session' | 'basic';
 
@@ -24,6 +25,7 @@ export interface CmdbuildConfig {
   apiPath?: string;
   defaultUserGroupId?: string | number;
   authMode?: CmdbuildAuthMode;
+  diagnosticTargetSystem?: string;
   tls?: TlsConnectionConfig;
 }
 
@@ -64,6 +66,7 @@ export class CmdbuildConnectorService implements Connector {
 
   constructor(
     private readonly httpService: HttpService,
+    private readonly diagnostics: DiagnosticLoggerService,
     @Optional() private readonly tlsOptions?: TlsOptionsFactory,
   ) {}
 
@@ -86,6 +89,7 @@ export class CmdbuildConnectorService implements Connector {
         string,
         unknown
       >;
+      config.diagnosticTargetSystem = payload.targetSystem;
 
       // Special handling for group member operations to preserve existing members
       if (
@@ -198,6 +202,14 @@ export class CmdbuildConnectorService implements Connector {
 
     const apiPath = this.getApiPath(config);
     const url = `${config.baseUrl}${apiPath}/sessions?scope=service&returnId=true`;
+    const targetSystem = this.diagnosticTargetSystem(config);
+    this.diagnostics.verbose('cmdbuild.session.request', {
+      targetSystem,
+      baseUrlOrigin: this.safeOrigin(config.baseUrl),
+      apiPath,
+      path: '/sessions',
+      authMode: 'session',
+    });
 
     try {
       const response = await lastValueFrom(
@@ -219,8 +231,20 @@ export class CmdbuildConnectorService implements Connector {
         throw new Error('CMDBuild session response did not include _id');
       }
       this.sessionTokens.set(cacheKey, sessionId);
+      this.diagnostics.basic('cmdbuild.session.success', {
+        targetSystem,
+        baseUrlOrigin: this.safeOrigin(config.baseUrl),
+        apiPath,
+      });
       return sessionId;
     } catch (error: unknown) {
+      this.diagnostics.basic('cmdbuild.session.failure', {
+        targetSystem,
+        baseUrlOrigin: this.safeOrigin(config.baseUrl),
+        apiPath,
+        status: this.errorStatus(error),
+        message: this.safeErrorMessage(error, config),
+      });
       throw new Error(
         `CMDBuild session authentication failed: ${this.safeErrorMessage(
           error,
@@ -356,8 +380,17 @@ export class CmdbuildConnectorService implements Connector {
     const authMode = this.normalizeAuthMode(config);
     const apiPath = this.getApiPath(config);
     const url = `${config.baseUrl}${apiPath}${path}`;
+    const targetSystem = this.diagnosticTargetSystem(config);
 
     try {
+      this.diagnostics.verbose('cmdbuild.request', {
+        targetSystem,
+        baseUrlOrigin: this.safeOrigin(config.baseUrl),
+        apiPath,
+        method,
+        path: this.safePath(path),
+        authMode,
+      });
       const authHeaders = await this.getAuthHeaders(config, authMode);
       const response = await lastValueFrom(
         this.httpService.request({
@@ -376,6 +409,14 @@ export class CmdbuildConnectorService implements Connector {
           ) ?? {}),
         }),
       );
+      this.diagnostics.basic('cmdbuild.request.success', {
+        targetSystem,
+        baseUrlOrigin: this.safeOrigin(config.baseUrl),
+        apiPath,
+        method,
+        path: this.safePath(path),
+        status: response.status,
+      });
       return response.data;
     } catch (error: unknown) {
       if (
@@ -386,8 +427,46 @@ export class CmdbuildConnectorService implements Connector {
         this.sessionTokens.delete(this.sessionCacheKey(config));
         return this.call(config, method, path, body, false);
       }
+      this.diagnostics.basic('cmdbuild.request.failure', {
+        targetSystem,
+        baseUrlOrigin: this.safeOrigin(config.baseUrl),
+        apiPath,
+        method,
+        path: this.safePath(path),
+        status: this.errorStatus(error),
+        message: this.safeErrorMessage(error, config),
+      });
       throw error;
     }
+  }
+
+  private diagnosticTargetSystem(config: CmdbuildConfig): string | undefined {
+    return typeof config.diagnosticTargetSystem === 'string' &&
+      config.diagnosticTargetSystem.trim()
+      ? config.diagnosticTargetSystem.trim()
+      : undefined;
+  }
+
+  private safeOrigin(baseUrl: string): string {
+    try {
+      return new URL(baseUrl).origin;
+    } catch {
+      return 'invalid-url';
+    }
+  }
+
+  private safePath(path: string): string {
+    const queryStart = path.indexOf('?');
+    return queryStart >= 0 ? path.slice(0, queryStart) : path;
+  }
+
+  private errorStatus(error: unknown): number | undefined {
+    if (error === null || typeof error !== 'object') {
+      return undefined;
+    }
+    const status = (error as { response?: { status?: unknown } }).response
+      ?.status;
+    return typeof status === 'number' ? status : undefined;
   }
 
   private isSessionAuthFailure(error: unknown): boolean {

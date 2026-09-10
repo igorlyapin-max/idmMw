@@ -295,6 +295,50 @@ input[type='checkbox'] {
   margin-bottom: 12px;
 }
 
+.disclosure-heading {
+  display: inline-flex;
+  min-width: 0;
+  min-height: 34px;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--color-text-strong);
+  cursor: pointer;
+  font: inherit;
+  font-size: 20px;
+  font-weight: 700;
+  text-align: left;
+}
+
+.disclosure-heading:hover,
+.disclosure-heading:focus-visible {
+  color: var(--color-primary);
+}
+
+.disclosure-indicator {
+  display: inline-flex;
+  width: 16px;
+  flex: 0 0 16px;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-size: 16px;
+  line-height: 1;
+}
+
+.disclosure-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.collapsible-panel-body {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+}
+
 .fieldset {
   display: grid;
   gap: 12px;
@@ -367,6 +411,83 @@ input[type='checkbox'] {
   border-top: 1px solid var(--color-border);
   color: var(--color-text-muted);
   font-size: 12px;
+}
+
+.button-indicator {
+  margin-left: 6px;
+  padding: 1px 4px;
+  border: 1px solid var(--color-border);
+  background: var(--color-row-hover);
+  color: var(--color-text-strong);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgb(15 23 42 / 0.38);
+}
+
+.modal-panel {
+  width: min(720px, 100%);
+  max-height: min(760px, calc(100vh - 40px));
+  overflow: auto;
+  padding: 16px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  box-shadow: 0 18px 48px rgb(15 23 42 / 0.18);
+}
+
+.modal-panel.wide {
+  width: min(980px, 100%);
+}
+
+.log-viewer {
+  display: grid;
+  gap: 8px;
+  max-height: min(520px, calc(100vh - 220px));
+  overflow: auto;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg);
+}
+
+.log-line {
+  min-width: 680px;
+  margin: 0;
+  padding: 8px;
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-text);
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre;
+}
+
+.empty-state {
+  padding: 12px;
+  color: var(--color-text-muted);
+  font-size: 13px;
+}
+
+.runtime-debug-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.runtime-debug-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg);
 }
 
 .extra-config-list {

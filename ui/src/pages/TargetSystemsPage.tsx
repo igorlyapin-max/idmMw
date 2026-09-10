@@ -1,10 +1,17 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import type { KeyboardEvent, RefObject } from 'react';
 import {
   createTargetSystem,
   deleteTargetSystem,
+  disableRuntimeDebug,
+  enableRuntimeDebug,
+  fetchRuntimeDebugStatus,
+  fetchRuntimeLogs,
   fetchTargetSystems,
   testTargetSystemConnection,
   updateTargetSystem,
+  type RuntimeDebugSession,
+  type RuntimeLogEvent,
   type TargetSystem,
 } from '../api/client';
 
@@ -453,6 +460,28 @@ function formatExtraConfigValue(key: string, value: unknown): string {
   }
 }
 
+function formatRuntimeLogEvent(item: RuntimeLogEvent): string {
+  return JSON.stringify(
+    {
+      id: item.id,
+      time: item.time,
+      level: item.level,
+      msg: item.msg,
+      event: item.event,
+      diagnostic: item.diagnostic,
+      diagnosticLevel: item.diagnosticLevel,
+      targetSystem: item.targetSystem,
+      context: item.context,
+      method: item.method,
+      path: item.path,
+      status: item.status,
+      responseTime: item.responseTime,
+    },
+    null,
+    2,
+  );
+}
+
 export function TargetSystemsPage() {
   const [items, setItems] = useState<TargetSystem[]>([]);
   const [loading, setLoading] = useState(false);
@@ -461,7 +490,23 @@ export function TargetSystemsPage() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [form, setForm] = useState<TargetSystemForm>(() => newForm());
   const [editing, setEditing] = useState(false);
+  const [formExpanded, setFormExpanded] = useState(false);
   const [message, setMessage] = useState('');
+  const [logsTarget, setLogsTarget] = useState<TargetSystem | null>(null);
+  const [logs, setLogs] = useState<RuntimeLogEvent[]>([]);
+  const [logsLevel, setLogsLevel] = useState('');
+  const [logsLoading, setLogsLoading] = useState(false);
+  const [logsAutoRefresh, setLogsAutoRefresh] = useState(false);
+  const [debugTarget, setDebugTarget] = useState<TargetSystem | null>(null);
+  const [debugSessions, setDebugSessions] = useState<RuntimeDebugSession[]>([]);
+  const [debugLevel, setDebugLevel] = useState<'Basic' | 'Verbose'>('Basic');
+  const [debugTtlSeconds, setDebugTtlSeconds] = useState(300);
+  const [debugSaving, setDebugSaving] = useState(false);
+  const lastModalTriggerRef = useRef<HTMLElement | null>(null);
+  const logsPanelRef = useRef<HTMLDivElement | null>(null);
+  const logsCloseRef = useRef<HTMLButtonElement | null>(null);
+  const debugPanelRef = useRef<HTMLDivElement | null>(null);
+  const debugCloseRef = useRef<HTMLButtonElement | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -481,9 +526,89 @@ export function TargetSystemsPage() {
     return () => window.clearTimeout(timer);
   }, [load]);
 
+  const loadDebugStatus = useCallback(async () => {
+    try {
+      const status = await fetchRuntimeDebugStatus();
+      setDebugSessions(status.active);
+    } catch (e: unknown) {
+      setMessage(`Error: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }, []);
+
+  const loadLogs = useCallback(async () => {
+    if (!logsTarget) return;
+    setLogsLoading(true);
+    try {
+      setLogs(
+        await fetchRuntimeLogs({
+          targetSystem: logsTarget.name,
+          level: logsLevel || undefined,
+          limit: 200,
+        }),
+      );
+    } catch (e: unknown) {
+      setMessage(`Error: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setLogsLoading(false);
+    }
+  }, [logsLevel, logsTarget]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void loadDebugStatus();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [loadDebugStatus]);
+
+  useEffect(() => {
+    if (!logsTarget) return;
+    const timer = window.setTimeout(() => {
+      void loadLogs();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [loadLogs, logsTarget]);
+
+  useEffect(() => {
+    if (!logsTarget || !logsAutoRefresh) return;
+    const timer = window.setInterval(() => {
+      void loadLogs();
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [loadLogs, logsAutoRefresh, logsTarget]);
+
+  useEffect(() => {
+    if (debugSessions.length === 0 && !debugTarget) return;
+    const timer = window.setInterval(() => {
+      void loadDebugStatus();
+    }, 30000);
+    return () => window.clearInterval(timer);
+  }, [debugSessions.length, debugTarget, loadDebugStatus]);
+
+  useEffect(() => {
+    if (debugSessions.length === 0) return;
+    const timer = window.setInterval(() => {
+      const now = Date.now();
+      setDebugSessions((sessions) =>
+        sessions.filter((session) => Date.parse(session.expiresAt) > now),
+      );
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [debugSessions.length]);
+
+  useEffect(() => {
+    if (!logsTarget) return;
+    logsCloseRef.current?.focus();
+  }, [logsTarget]);
+
+  useEffect(() => {
+    if (!debugTarget) return;
+    debugCloseRef.current?.focus();
+  }, [debugTarget]);
+
   const resetForm = () => {
     setForm(newForm());
     setEditing(false);
+    setFormExpanded(false);
     setMessage('');
   };
 
@@ -561,6 +686,7 @@ export function TargetSystemsPage() {
       enabled: item.enabled,
     });
     setEditing(true);
+    setFormExpanded(true);
     setMessage('');
   };
 
@@ -592,8 +718,115 @@ export function TargetSystemsPage() {
     }
   };
 
+  const restoreModalFocus = useCallback(() => {
+    lastModalTriggerRef.current?.focus();
+    lastModalTriggerRef.current = null;
+  }, []);
+
+  const closeLogs = useCallback(() => {
+    setLogsTarget(null);
+    setLogsAutoRefresh(false);
+    restoreModalFocus();
+  }, [restoreModalFocus]);
+
+  const closeDebug = useCallback(() => {
+    setDebugTarget(null);
+    restoreModalFocus();
+  }, [restoreModalFocus]);
+
+  useEffect(() => {
+    if (!logsTarget && !debugTarget) return;
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      if (logsTarget) {
+        closeLogs();
+      } else if (debugTarget) {
+        closeDebug();
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [closeDebug, closeLogs, debugTarget, logsTarget]);
+
+  const openLogs = (item: TargetSystem) => {
+    lastModalTriggerRef.current = document.activeElement as HTMLElement | null;
+    setLogsTarget(item);
+    setLogs([]);
+    setLogsLevel('');
+  };
+
+  const openDebug = async (item: TargetSystem) => {
+    lastModalTriggerRef.current = document.activeElement as HTMLElement | null;
+    setDebugTarget(item);
+    setDebugLevel('Basic');
+    setDebugTtlSeconds(300);
+    await loadDebugStatus();
+  };
+
+  const handleEnableDebug = async () => {
+    if (!debugTarget) return;
+    setDebugSaving(true);
+    try {
+      await enableRuntimeDebug({
+        targetSystem: debugTarget.name,
+        level: debugLevel,
+        ttlSeconds: debugTtlSeconds,
+      });
+      await loadDebugStatus();
+      setMessage(`Temporary debug enabled for ${debugTarget.name}`);
+    } catch (e: unknown) {
+      setMessage(`Error: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setDebugSaving(false);
+    }
+  };
+
+  const handleDisableDebug = async (id: string) => {
+    setDebugSaving(true);
+    try {
+      await disableRuntimeDebug(id);
+      await loadDebugStatus();
+      setMessage('Temporary debug disabled');
+    } catch (e: unknown) {
+      setMessage(`Error: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setDebugSaving(false);
+    }
+  };
+
   const currentFields = TYPE_FIELDS[form.type] ?? [];
   const extraConfigEntries = Object.entries(form.extraConfig);
+  const formPanelId = 'target-system-form-panel';
+  const activeDebugForTarget = (targetSystem: string) =>
+    debugSessions.filter((session) => session.targetSystem === targetSystem);
+  const trapModalKeyboard = (
+    event: KeyboardEvent,
+    panelRef: RefObject<HTMLDivElement | null>,
+    close: () => void,
+  ) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      close();
+      return;
+    }
+    if (event.key !== 'Tab') return;
+    const focusable = Array.from(
+      panelRef.current?.querySelectorAll<HTMLElement>(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+      ) ?? [],
+    ).filter((element) => !element.hasAttribute('disabled'));
+    if (focusable.length === 0) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
 
   return (
     <div className="page-shell">
@@ -608,7 +841,20 @@ export function TargetSystemsPage() {
 
       <section className="panel">
         <div className="section-title-row">
-          <h2>{editing ? 'Edit target system' : 'Create target system'}</h2>
+          <button
+            className="disclosure-heading"
+            type="button"
+            aria-expanded={formExpanded}
+            aria-controls={formPanelId}
+            onClick={() => setFormExpanded((expanded) => !expanded)}
+          >
+            <span className="disclosure-indicator" aria-hidden="true">
+              {formExpanded ? 'v' : '>'}
+            </span>
+            <span className="disclosure-title">
+              {editing ? `Edit target system: ${form.name}` : 'Create target system'}
+            </span>
+          </button>
           {editing && (
             <button className="button" onClick={resetForm}>
               Cancel
@@ -616,233 +862,244 @@ export function TargetSystemsPage() {
           )}
         </div>
 
-        <div className="form-grid">
-          <label>
-            Name
-            <input
-              value={form.name}
-              onChange={(e) => setForm({ ...form, name: e.target.value })}
-            />
-          </label>
-          <label>
-            Type
-            <select
-              value={form.type}
-              onChange={(e) =>
-                setForm({
-                  ...form,
-                  type: e.target.value,
-                  configValues: {},
-                  extraConfig: {},
-                })
-              }
-            >
-              {TYPE_OPTIONS.map((type) => (
-                <option key={type} value={type}>
-                  {type}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Label
-            <input
-              value={form.label}
-              onChange={(e) => setForm({ ...form, label: e.target.value })}
-            />
-          </label>
-          <label className="checkbox-row">
-            <input
-              type="checkbox"
-              checked={form.enabled}
-              onChange={(e) => setForm({ ...form, enabled: e.target.checked })}
-            />
-            Enabled
-          </label>
-        </div>
-
-        <fieldset className="fieldset">
-          <legend>Connector config</legend>
-          <div className="form-grid">
-            {currentFields.map((field) => (
-              <label key={field.name}>
-                {field.label}
-                {field.options ? (
-                  <select
-                    value={
-                      form.configValues[field.name] ?? field.defaultValue ?? ''
-                    }
-                    onChange={(e) =>
-                      setForm({
-                        ...form,
-                        configValues: {
-                          ...form.configValues,
-                          [field.name]: e.target.value,
-                        },
-                      })
-                    }
-                  >
-                    {field.options.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                ) : field.inputType === 'json' ? (
-                  <textarea
-                    className="mono"
-                    rows={5}
-                    placeholder={field.placeholder}
-                    value={form.configValues[field.name] ?? ''}
-                    onChange={(e) =>
-                      setForm({
-                        ...form,
-                        configValues: {
-                          ...form.configValues,
-                          [field.name]: e.target.value,
-                        },
-                      })
-                    }
-                  />
-                ) : (
-                  <input
-                    type={field.inputType ?? 'text'}
-                    placeholder={field.placeholder}
-                    value={form.configValues[field.name] ?? ''}
-                    onChange={(e) =>
-                      setForm({
-                        ...form,
-                        configValues: {
-                          ...form.configValues,
-                          [field.name]: e.target.value,
-                        },
-                      })
-                    }
-                  />
-                )}
-                {field.help && <span className="field-help">{field.help}</span>}
+        {formExpanded && (
+          <div className="collapsible-panel-body" id={formPanelId}>
+            <div className="form-grid">
+              <label>
+                Name
+                <input
+                  value={form.name}
+                  onChange={(e) => setForm({ ...form, name: e.target.value })}
+                />
               </label>
-            ))}
-          </div>
-          {extraConfigEntries.length > 0 && (
-            <details className="config-details">
-              <summary>
-                <span>Additional config keys</span>
-                <span className="details-count">
-                  {extraConfigEntries.length}
-                </span>
-              </summary>
-              <p className="details-note">
-                Preserved in TargetSystem.config but not edited by this form.
-              </p>
-              <dl className="extra-config-list">
-                {extraConfigEntries.map(([key, value]) => {
-                  const formatted = formatExtraConfigValue(key, value);
-                  return (
-                    <div className="extra-config-row" key={key}>
-                      <dt className="mono">{key}</dt>
-                      <dd title={formatted}>{formatted}</dd>
-                    </div>
-                  );
-                })}
-              </dl>
-            </details>
-          )}
-        </fieldset>
+              <label>
+                Type
+                <select
+                  value={form.type}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      type: e.target.value,
+                      configValues: {},
+                      extraConfig: {},
+                    })
+                  }
+                >
+                  {TYPE_OPTIONS.map((type) => (
+                    <option key={type} value={type}>
+                      {type}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Label
+                <input
+                  value={form.label}
+                  onChange={(e) => setForm({ ...form, label: e.target.value })}
+                />
+              </label>
+              <label className="checkbox-row">
+                <input
+                  type="checkbox"
+                  checked={form.enabled}
+                  onChange={(e) =>
+                    setForm({ ...form, enabled: e.target.checked })
+                  }
+                />
+                Enabled
+              </label>
+            </div>
 
-        <fieldset className="fieldset">
-          <legend>DLQ retry policy</legend>
-          <div className="form-grid">
-            <label>
-              Max retries
-              <input
-                inputMode="numeric"
-                value={form.retryPolicy.maxRetries}
-                onChange={(e) =>
-                  setForm({
-                    ...form,
-                    retryPolicy: {
-                      ...form.retryPolicy,
-                      maxRetries: e.target.value,
-                    },
-                  })
-                }
-              />
-            </label>
-            <label>
-              Base delay ms
-              <input
-                inputMode="numeric"
-                value={form.retryPolicy.baseDelayMs}
-                onChange={(e) =>
-                  setForm({
-                    ...form,
-                    retryPolicy: {
-                      ...form.retryPolicy,
-                      baseDelayMs: e.target.value,
-                    },
-                  })
-                }
-              />
-            </label>
-            <label>
-              Max delay ms
-              <input
-                inputMode="numeric"
-                value={form.retryPolicy.maxDelayMs}
-                onChange={(e) =>
-                  setForm({
-                    ...form,
-                    retryPolicy: {
-                      ...form.retryPolicy,
-                      maxDelayMs: e.target.value,
-                    },
-                  })
-                }
-              />
-            </label>
-            <label>
-              DLQ lease seconds
-              <input
-                inputMode="numeric"
-                value={form.retryPolicy.dlqLeaseSeconds}
-                onChange={(e) =>
-                  setForm({
-                    ...form,
-                    retryPolicy: {
-                      ...form.retryPolicy,
-                      dlqLeaseSeconds: e.target.value,
-                    },
-                  })
-                }
-              />
-            </label>
-            <label className="checkbox-row">
-              <input
-                type="checkbox"
-                checked={form.retryPolicy.jitter}
-                onChange={(e) =>
-                  setForm({
-                    ...form,
-                    retryPolicy: {
-                      ...form.retryPolicy,
-                      jitter: e.target.checked,
-                    },
-                  })
-                }
-              />
-              Jitter
-            </label>
-          </div>
-        </fieldset>
+            <fieldset className="fieldset">
+              <legend>Connector config</legend>
+              <div className="form-grid">
+                {currentFields.map((field) => (
+                  <label key={field.name}>
+                    {field.label}
+                    {field.options ? (
+                      <select
+                        value={
+                          form.configValues[field.name] ??
+                          field.defaultValue ??
+                          ''
+                        }
+                        onChange={(e) =>
+                          setForm({
+                            ...form,
+                            configValues: {
+                              ...form.configValues,
+                              [field.name]: e.target.value,
+                            },
+                          })
+                        }
+                      >
+                        {field.options.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    ) : field.inputType === 'json' ? (
+                      <textarea
+                        className="mono"
+                        rows={5}
+                        placeholder={field.placeholder}
+                        value={form.configValues[field.name] ?? ''}
+                        onChange={(e) =>
+                          setForm({
+                            ...form,
+                            configValues: {
+                              ...form.configValues,
+                              [field.name]: e.target.value,
+                            },
+                          })
+                        }
+                      />
+                    ) : (
+                      <input
+                        type={field.inputType ?? 'text'}
+                        placeholder={field.placeholder}
+                        value={form.configValues[field.name] ?? ''}
+                        onChange={(e) =>
+                          setForm({
+                            ...form,
+                            configValues: {
+                              ...form.configValues,
+                              [field.name]: e.target.value,
+                            },
+                          })
+                        }
+                      />
+                    )}
+                    {field.help && (
+                      <span className="field-help">{field.help}</span>
+                    )}
+                  </label>
+                ))}
+              </div>
+              {extraConfigEntries.length > 0 && (
+                <details className="config-details">
+                  <summary>
+                    <span>Additional config keys</span>
+                    <span className="details-count">
+                      {extraConfigEntries.length}
+                    </span>
+                  </summary>
+                  <p className="details-note">
+                    Preserved in TargetSystem.config but not edited by this
+                    form.
+                  </p>
+                  <dl className="extra-config-list">
+                    {extraConfigEntries.map(([key, value]) => {
+                      const formatted = formatExtraConfigValue(key, value);
+                      return (
+                        <div className="extra-config-row" key={key}>
+                          <dt className="mono">{key}</dt>
+                          <dd title={formatted}>{formatted}</dd>
+                        </div>
+                      );
+                    })}
+                  </dl>
+                </details>
+              )}
+            </fieldset>
 
-        <button
-          className="button primary"
-          onClick={handleSave}
-          disabled={saving}
-        >
-          {saving ? 'Saving...' : editing ? 'Update' : 'Create'}
-        </button>
+            <fieldset className="fieldset">
+              <legend>DLQ retry policy</legend>
+              <div className="form-grid">
+                <label>
+                  Max retries
+                  <input
+                    inputMode="numeric"
+                    value={form.retryPolicy.maxRetries}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        retryPolicy: {
+                          ...form.retryPolicy,
+                          maxRetries: e.target.value,
+                        },
+                      })
+                    }
+                  />
+                </label>
+                <label>
+                  Base delay ms
+                  <input
+                    inputMode="numeric"
+                    value={form.retryPolicy.baseDelayMs}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        retryPolicy: {
+                          ...form.retryPolicy,
+                          baseDelayMs: e.target.value,
+                        },
+                      })
+                    }
+                  />
+                </label>
+                <label>
+                  Max delay ms
+                  <input
+                    inputMode="numeric"
+                    value={form.retryPolicy.maxDelayMs}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        retryPolicy: {
+                          ...form.retryPolicy,
+                          maxDelayMs: e.target.value,
+                        },
+                      })
+                    }
+                  />
+                </label>
+                <label>
+                  DLQ lease seconds
+                  <input
+                    inputMode="numeric"
+                    value={form.retryPolicy.dlqLeaseSeconds}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        retryPolicy: {
+                          ...form.retryPolicy,
+                          dlqLeaseSeconds: e.target.value,
+                        },
+                      })
+                    }
+                  />
+                </label>
+                <label className="checkbox-row">
+                  <input
+                    type="checkbox"
+                    checked={form.retryPolicy.jitter}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        retryPolicy: {
+                          ...form.retryPolicy,
+                          jitter: e.target.checked,
+                        },
+                      })
+                    }
+                  />
+                  Jitter
+                </label>
+              </div>
+            </fieldset>
+
+            <button
+              className="button primary"
+              onClick={handleSave}
+              disabled={saving}
+            >
+              {saving ? 'Saving...' : editing ? 'Update' : 'Create'}
+            </button>
+          </div>
+        )}
       </section>
 
       <table className="data-table">
@@ -892,6 +1149,23 @@ export function TargetSystemsPage() {
                     </button>
                     <button
                       className="button small"
+                      onClick={() => openLogs(item)}
+                    >
+                      Logs
+                    </button>
+                    <button
+                      className="button small"
+                      onClick={() => void openDebug(item)}
+                    >
+                      Debug
+                      {activeDebugForTarget(item.name).length > 0 && (
+                        <span className="button-indicator" aria-label="active">
+                          on
+                        </span>
+                      )}
+                    </button>
+                    <button
+                      className="button small"
                       onClick={() => handleEdit(item)}
                     >
                       Edit
@@ -910,6 +1184,163 @@ export function TargetSystemsPage() {
           })}
         </tbody>
       </table>
+
+      {logsTarget && (
+        <div
+          className="modal-backdrop"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="target-logs-title"
+          onKeyDown={(event) =>
+            trapModalKeyboard(event, logsPanelRef, closeLogs)
+          }
+        >
+          <div
+            className="modal-panel wide"
+            ref={logsPanelRef}
+          >
+            <div className="section-title-row">
+              <h2 id="target-logs-title">Logs: {logsTarget.name}</h2>
+              <button
+                className="button"
+                ref={logsCloseRef}
+                onClick={closeLogs}
+              >
+                Close
+              </button>
+            </div>
+            <div className="toolbar">
+              <label>
+                Level
+                <select
+                  value={logsLevel}
+                  onChange={(e) => setLogsLevel(e.target.value)}
+                >
+                  <option value="">All</option>
+                  <option value="debug">debug</option>
+                  <option value="info">info</option>
+                  <option value="warn">warn</option>
+                  <option value="error">error</option>
+                </select>
+              </label>
+              <label className="checkbox-row">
+                <input
+                  type="checkbox"
+                  checked={logsAutoRefresh}
+                  onChange={(e) => setLogsAutoRefresh(e.target.checked)}
+                />
+                Auto-refresh
+              </label>
+              <button
+                className="button"
+                onClick={() => void loadLogs()}
+                disabled={logsLoading}
+              >
+                {logsLoading ? 'Refreshing...' : 'Refresh'}
+              </button>
+            </div>
+            <div className="log-viewer" aria-live="polite">
+              {logs.length === 0 ? (
+                <div className="empty-state">No buffered logs for this target system.</div>
+              ) : (
+                logs.map((item) => (
+                  <pre className="log-line" key={item.id}>
+                    {formatRuntimeLogEvent(item)}
+                  </pre>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {debugTarget && (
+        <div
+          className="modal-backdrop"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="target-debug-title"
+          onKeyDown={(event) =>
+            trapModalKeyboard(event, debugPanelRef, closeDebug)
+          }
+        >
+          <div
+            className="modal-panel"
+            ref={debugPanelRef}
+          >
+            <div className="section-title-row">
+              <h2 id="target-debug-title">Debug: {debugTarget.name}</h2>
+              <button
+                className="button"
+                ref={debugCloseRef}
+                onClick={closeDebug}
+              >
+                Close
+              </button>
+            </div>
+            <div className="form-grid">
+              <label>
+                Level
+                <select
+                  value={debugLevel}
+                  onChange={(e) =>
+                    setDebugLevel(e.target.value === 'Verbose' ? 'Verbose' : 'Basic')
+                  }
+                >
+                  <option value="Basic">Basic</option>
+                  <option value="Verbose">Verbose</option>
+                </select>
+              </label>
+              <label>
+                Duration
+                <select
+                  value={debugTtlSeconds}
+                  onChange={(e) => setDebugTtlSeconds(Number(e.target.value))}
+                >
+                  <option value={300}>5m</option>
+                  <option value={900}>15m</option>
+                  <option value={1800}>30m</option>
+                </select>
+              </label>
+            </div>
+            <button
+              className="button primary"
+              onClick={() => void handleEnableDebug()}
+              disabled={debugSaving}
+            >
+              {debugSaving ? 'Enabling...' : 'Enable temporary debug'}
+            </button>
+            <button
+              className="button"
+              onClick={() => void loadDebugStatus()}
+              disabled={debugSaving}
+            >
+              Refresh
+            </button>
+            <div className="runtime-debug-list">
+              {activeDebugForTarget(debugTarget.name).length === 0 ? (
+                <div className="empty-state">No active debug sessions for this target system.</div>
+              ) : (
+                activeDebugForTarget(debugTarget.name).map((session) => (
+                  <div className="runtime-debug-row" key={session.id}>
+                    <div>
+                      <strong>{session.level}</strong>
+                      <span> expires {new Date(session.expiresAt).toLocaleString()}</span>
+                    </div>
+                    <button
+                      className="button small"
+                      onClick={() => void handleDisableDebug(session.id)}
+                      disabled={debugSaving}
+                    >
+                      Disable
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

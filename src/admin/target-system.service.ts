@@ -140,6 +140,7 @@ export class TargetSystemService {
     }
     const config =
       this.jsonHelper.fromJson<Record<string, unknown>>(ts.config) ?? {};
+    config['diagnosticTargetSystem'] = ts.name;
     return this.registry.testConnection(ts.type, config);
   }
 
