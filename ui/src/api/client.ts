@@ -263,6 +263,7 @@ export interface RuntimeDebugSession {
 export interface RuntimeLogEvent {
   id: number;
   time: number;
+  receivedAt: string;
   level: number | string;
   msg?: string;
   event?: string;
@@ -303,4 +304,11 @@ export async function fetchRuntimeLogs(params: {
 }): Promise<RuntimeLogEvent[]> {
   const res = await apiClient.get('/admin/runtime/logs', { params });
   return (res.data as { items: RuntimeLogEvent[] }).items;
+}
+
+export async function clearRuntimeLogs(params: {
+  targetSystem: string;
+}): Promise<{ success: boolean; cleared: number }> {
+  const res = await apiClient.delete('/admin/runtime/logs', { params });
+  return res.data as { success: boolean; cleared: number };
 }

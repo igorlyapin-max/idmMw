@@ -108,6 +108,7 @@ curl -fsS \
   "http://127.0.0.1:${PORT}/admin/runtime/logs?targetSystem=fake&limit=abc" >"$LOGS_RESPONSE_PATH"
 grep -q '"items":' "$LOGS_RESPONSE_PATH"
 grep -q '"event":"idm.webhook.received"' "$LOGS_RESPONSE_PATH"
+grep -q '"receivedAt":"' "$LOGS_RESPONSE_PATH"
 
 if grep -q '"raw"\|"headers"\|"query"\|"params"\|"payload"\|"data"\|"config"' "$LOGS_RESPONSE_PATH"; then
   echo "Unsafe raw diagnostic fields leaked to $LOGS_RESPONSE_PATH"
@@ -118,6 +119,16 @@ if grep -q 'plain-credential\|plain-marker\|Authorization\|Cookie' "$LOGS_RESPON
   echo "Sensitive diagnostic payload leaked to $LOGS_RESPONSE_PATH"
   exit 1
 fi
+
+curl -fsS \
+  -X DELETE \
+  "http://127.0.0.1:${PORT}/admin/runtime/logs?targetSystem=fake" >"$DEBUG_RESPONSE_PATH"
+grep -q '"success":true' "$DEBUG_RESPONSE_PATH"
+grep -q '"cleared":' "$DEBUG_RESPONSE_PATH"
+
+curl -fsS \
+  "http://127.0.0.1:${PORT}/admin/runtime/logs?targetSystem=fake" >"$LOGS_RESPONSE_PATH"
+grep -q '"items":\[\]' "$LOGS_RESPONSE_PATH"
 
 grep -q '"event":"startup.runtime"' "$LOG_PATH"
 grep -q '"event":"idm.webhook.received"' "$LOG_PATH"

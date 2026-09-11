@@ -40,7 +40,12 @@ describe('WebhookController', () => {
     expect(result.data).toBeUndefined();
     expect(diagnostics.basic).toHaveBeenCalledWith(
       'idm.webhook.received',
-      expect.objectContaining({ mode: 'write' }),
+      expect.objectContaining({
+        mode: 'write',
+        receivedAt: expect.stringMatching(
+          /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/,
+        ),
+      }),
     );
   });
 
@@ -60,7 +65,12 @@ describe('WebhookController', () => {
     expect(result.data).toEqual({ id: 'user-1' });
     expect(diagnostics.basic).toHaveBeenCalledWith(
       'idm.webhook.received',
-      expect.objectContaining({ mode: 'read' }),
+      expect.objectContaining({
+        mode: 'read',
+        receivedAt: expect.stringMatching(
+          /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/,
+        ),
+      }),
     );
   });
 });

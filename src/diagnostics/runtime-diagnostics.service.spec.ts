@@ -82,6 +82,24 @@ describe('RuntimeDiagnosticsService', () => {
 
     expect(logs).toHaveLength(1);
     expect(logs[0].msg).toBe('error');
+    expect(logs[0].receivedAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
+  });
+
+  it('clears process-local logs by target system without disabling debug', () => {
+    const service = new RuntimeDiagnosticsService();
+    service.enable({ targetSystem: 'CMDB', level: 'Verbose' });
+    runtimeLogBuffer.append({ level: 30, targetSystem: 'CMDB', msg: 'cmdb' });
+    runtimeLogBuffer.append({
+      level: 30,
+      targetSystem: 'OTHER',
+      msg: 'other',
+    });
+
+    expect(service.clearLogs({ targetSystem: 'CMDB' })).toEqual({ cleared: 1 });
+    expect(service.logs({ limit: 10 }).map((item) => item.msg)).toEqual([
+      'other',
+    ]);
+    expect(service.isEnabled('CMDB')).toBe(true);
   });
 
   it('normalizes malformed log limits and returns safe log records', () => {

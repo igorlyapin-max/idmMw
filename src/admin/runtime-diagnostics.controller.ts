@@ -57,4 +57,10 @@ export class RuntimeDiagnosticsController {
       }),
     };
   }
+
+  @Delete('logs')
+  clearLogs(@Query('targetSystem') targetSystem?: string) {
+    const result = this.diagnostics.clearLogs({ targetSystem });
+    return { success: true, ...result };
+  }
 }

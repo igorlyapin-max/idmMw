@@ -67,6 +67,10 @@ export class RuntimeDiagnosticsService {
     return runtimeLogBuffer.query(query);
   }
 
+  clearLogs(query: { targetSystem?: string } = {}): { cleared: number } {
+    return { cleared: runtimeLogBuffer.clear(query) };
+  }
+
   private activeSessions(): RuntimeDebugSession[] {
     const now = Date.now();
     const active: RuntimeDebugSession[] = [];

@@ -141,6 +141,7 @@ export class WebhookController {
   async receiveWebhook(
     @Body() dto: AvanpostWebhookDto,
   ): Promise<WebhookResponse> {
+    const receivedAt = new Date().toISOString();
     this.logger.log(
       `Received webhook: ${dto.eventId}, operation: ${dto.operation}, targetSystem: ${dto.targetSystem}`,
     );
@@ -149,12 +150,14 @@ export class WebhookController {
       eventId: dto.eventId,
       operation: dto.operation,
       targetSystem: dto.targetSystem,
+      receivedAt,
       mode: isRead ? 'read' : 'write',
     });
     this.diagnostics.verbose('idm.webhook.payload', {
       eventId: dto.eventId,
       operation: dto.operation,
       targetSystem: dto.targetSystem,
+      receivedAt,
       payload: dto.payload,
     });
     const result = await this.webhookService.processWebhook(dto, isRead);

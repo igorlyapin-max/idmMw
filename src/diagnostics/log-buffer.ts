@@ -3,6 +3,7 @@ import { Writable } from 'stream';
 export interface BufferedLogEvent {
   id: number;
   time: number;
+  receivedAt: string;
   level: number | string;
   msg?: string;
   event?: string;
@@ -20,6 +21,10 @@ export interface LogQuery {
   targetSystem?: string;
   level?: string;
   limit?: number;
+}
+
+export interface LogClearQuery {
+  targetSystem?: string;
 }
 
 const MAX_LOG_EVENTS = 2000;
@@ -43,9 +48,23 @@ class RuntimeLogBuffer {
     }
   }
 
-  clear(): void {
-    this.events.splice(0, this.events.length);
-    this.nextId = 1;
+  clear(query: LogClearQuery = {}): number {
+    const targetSystem = query.targetSystem?.trim();
+    if (!targetSystem) {
+      const cleared = this.events.length;
+      this.events.splice(0, this.events.length);
+      this.nextId = 1;
+      return cleared;
+    }
+
+    let cleared = 0;
+    for (let index = this.events.length - 1; index >= 0; index -= 1) {
+      if (this.events[index].targetSystem === targetSystem) {
+        this.events.splice(index, 1);
+        cleared += 1;
+      }
+    }
+    return cleared;
   }
 
   query(query: LogQuery = {}): BufferedLogEvent[] {
@@ -70,9 +89,11 @@ class RuntimeLogBuffer {
   }
 
   private normalize(value: Record<string, unknown>): BufferedLogEvent {
+    const time = this.numberOrNow(value['time']);
     return {
       id: this.nextId++,
-      time: this.numberOrNow(value['time']),
+      time,
+      receivedAt: new Date(time).toISOString(),
       level: this.logLevel(value['level']),
       msg: this.stringValue(value['msg']),
       event: this.stringValue(value['event']),

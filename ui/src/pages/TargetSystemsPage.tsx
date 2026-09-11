@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent, RefObject } from 'react';
 import {
+  clearRuntimeLogs,
   createTargetSystem,
   deleteTargetSystem,
   disableRuntimeDebug,
@@ -460,11 +461,19 @@ function formatExtraConfigValue(key: string, value: unknown): string {
   }
 }
 
+function formatRuntimeReceivedAt(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString();
+}
+
 function formatRuntimeLogEvent(item: RuntimeLogEvent): string {
   return JSON.stringify(
     {
       id: item.id,
       time: item.time,
+      receivedAt: item.receivedAt,
+      receivedAtLocal: formatRuntimeReceivedAt(item.receivedAt),
       level: item.level,
       msg: item.msg,
       event: item.event,
@@ -496,6 +505,7 @@ export function TargetSystemsPage() {
   const [logs, setLogs] = useState<RuntimeLogEvent[]>([]);
   const [logsLevel, setLogsLevel] = useState('');
   const [logsLoading, setLogsLoading] = useState(false);
+  const [logsClearing, setLogsClearing] = useState(false);
   const [logsAutoRefresh, setLogsAutoRefresh] = useState(false);
   const [debugTarget, setDebugTarget] = useState<TargetSystem | null>(null);
   const [debugSessions, setDebugSessions] = useState<RuntimeDebugSession[]>([]);
@@ -505,6 +515,7 @@ export function TargetSystemsPage() {
   const lastModalTriggerRef = useRef<HTMLElement | null>(null);
   const logsPanelRef = useRef<HTMLDivElement | null>(null);
   const logsCloseRef = useRef<HTMLButtonElement | null>(null);
+  const logsRequestSeqRef = useRef(0);
   const debugPanelRef = useRef<HTMLDivElement | null>(null);
   const debugCloseRef = useRef<HTMLButtonElement | null>(null);
 
@@ -536,22 +547,46 @@ export function TargetSystemsPage() {
   }, []);
 
   const loadLogs = useCallback(async () => {
-    if (!logsTarget) return;
+    if (!logsTarget || logsClearing) return;
+    const requestSeq = (logsRequestSeqRef.current += 1);
     setLogsLoading(true);
     try {
-      setLogs(
-        await fetchRuntimeLogs({
-          targetSystem: logsTarget.name,
-          level: logsLevel || undefined,
-          limit: 200,
-        }),
+      const items = await fetchRuntimeLogs({
+        targetSystem: logsTarget.name,
+        level: logsLevel || undefined,
+        limit: 200,
+      });
+      if (logsRequestSeqRef.current === requestSeq) {
+        setLogs(items);
+      }
+    } catch (e: unknown) {
+      if (logsRequestSeqRef.current === requestSeq) {
+        setMessage(`Error: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    } finally {
+      if (logsRequestSeqRef.current === requestSeq) {
+        setLogsLoading(false);
+      }
+    }
+  }, [logsClearing, logsLevel, logsTarget]);
+
+  const clearLogs = useCallback(async () => {
+    if (!logsTarget) return;
+    logsRequestSeqRef.current += 1;
+    setLogsLoading(false);
+    setLogsClearing(true);
+    try {
+      const result = await clearRuntimeLogs({ targetSystem: logsTarget.name });
+      setLogs([]);
+      setMessage(
+        `Cleared ${result.cleared} buffered logs for ${logsTarget.name}`,
       );
     } catch (e: unknown) {
       setMessage(`Error: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
-      setLogsLoading(false);
+      setLogsClearing(false);
     }
-  }, [logsLevel, logsTarget]);
+  }, [logsTarget]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -569,12 +604,12 @@ export function TargetSystemsPage() {
   }, [loadLogs, logsTarget]);
 
   useEffect(() => {
-    if (!logsTarget || !logsAutoRefresh) return;
+    if (!logsTarget || !logsAutoRefresh || logsClearing) return;
     const timer = window.setInterval(() => {
       void loadLogs();
     }, 5000);
     return () => window.clearInterval(timer);
-  }, [loadLogs, logsAutoRefresh, logsTarget]);
+  }, [loadLogs, logsAutoRefresh, logsClearing, logsTarget]);
 
   useEffect(() => {
     if (debugSessions.length === 0 && !debugTarget) return;
@@ -852,7 +887,9 @@ export function TargetSystemsPage() {
               {formExpanded ? 'v' : '>'}
             </span>
             <span className="disclosure-title">
-              {editing ? `Edit target system: ${form.name}` : 'Create target system'}
+              {editing
+                ? `Edit target system: ${form.name}`
+                : 'Create target system'}
             </span>
           </button>
           {editing && (
@@ -1195,17 +1232,10 @@ export function TargetSystemsPage() {
             trapModalKeyboard(event, logsPanelRef, closeLogs)
           }
         >
-          <div
-            className="modal-panel wide"
-            ref={logsPanelRef}
-          >
+          <div className="modal-panel wide" ref={logsPanelRef}>
             <div className="section-title-row">
               <h2 id="target-logs-title">Logs: {logsTarget.name}</h2>
-              <button
-                className="button"
-                ref={logsCloseRef}
-                onClick={closeLogs}
-              >
+              <button className="button" ref={logsCloseRef} onClick={closeLogs}>
                 Close
               </button>
             </div>
@@ -1234,14 +1264,23 @@ export function TargetSystemsPage() {
               <button
                 className="button"
                 onClick={() => void loadLogs()}
-                disabled={logsLoading}
+                disabled={logsLoading || logsClearing}
               >
                 {logsLoading ? 'Refreshing...' : 'Refresh'}
+              </button>
+              <button
+                className="button danger"
+                onClick={() => void clearLogs()}
+                disabled={logsClearing || logsLoading}
+              >
+                {logsClearing ? 'Clearing...' : 'Clear'}
               </button>
             </div>
             <div className="log-viewer" aria-live="polite">
               {logs.length === 0 ? (
-                <div className="empty-state">No buffered logs for this target system.</div>
+                <div className="empty-state">
+                  No buffered logs for this target system.
+                </div>
               ) : (
                 logs.map((item) => (
                   <pre className="log-line" key={item.id}>
@@ -1264,10 +1303,7 @@ export function TargetSystemsPage() {
             trapModalKeyboard(event, debugPanelRef, closeDebug)
           }
         >
-          <div
-            className="modal-panel"
-            ref={debugPanelRef}
-          >
+          <div className="modal-panel" ref={debugPanelRef}>
             <div className="section-title-row">
               <h2 id="target-debug-title">Debug: {debugTarget.name}</h2>
               <button
@@ -1284,7 +1320,9 @@ export function TargetSystemsPage() {
                 <select
                   value={debugLevel}
                   onChange={(e) =>
-                    setDebugLevel(e.target.value === 'Verbose' ? 'Verbose' : 'Basic')
+                    setDebugLevel(
+                      e.target.value === 'Verbose' ? 'Verbose' : 'Basic',
+                    )
                   }
                 >
                   <option value="Basic">Basic</option>
@@ -1319,13 +1357,18 @@ export function TargetSystemsPage() {
             </button>
             <div className="runtime-debug-list">
               {activeDebugForTarget(debugTarget.name).length === 0 ? (
-                <div className="empty-state">No active debug sessions for this target system.</div>
+                <div className="empty-state">
+                  No active debug sessions for this target system.
+                </div>
               ) : (
                 activeDebugForTarget(debugTarget.name).map((session) => (
                   <div className="runtime-debug-row" key={session.id}>
                     <div>
                       <strong>{session.level}</strong>
-                      <span> expires {new Date(session.expiresAt).toLocaleString()}</span>
+                      <span>
+                        {' '}
+                        expires {new Date(session.expiresAt).toLocaleString()}
+                      </span>
                     </div>
                     <button
                       className="button small"

@@ -621,6 +621,65 @@ X-Request-Source: avanpost-idm
 Admin UI auth к этому endpoint не применяется. Не передавайте admin session или
 `X-CSRF-Token` из idmMw в IDM webhook.
 
+#### Пример реального скрипта Avanpost IDM
+
+Пример для скрипта из `Настройка процессов -> Скрипты`, который выбирается в
+поле `Функция обращения к сервису` у блока
+`Синхронное обращение к сервису`.
+
+Важные ограничения для IronPython в Avanpost IDM:
+
+- не добавляйте пробелы перед строками `import`;
+- не используйте `ServicePointManager`, если он недоступен в окружении IDM;
+- если `GetResponse()` уходит в timeout и в логах idmMw нет входящего запроса,
+  запрос не дошёл до idmMw: проверяйте DNS/route/firewall из процесса IDM;
+- имя `idmmw.` с точкой на конце не используйте, корректный service DNS:
+  `idmmw`.
+
+```python
+import json
+import System
+from System.Net import HttpWebRequest
+from System.Text import Encoding
+from System.IO import StreamReader
+
+url = "http://idmmw:3010/webhooks/avanpost"
+
+payload = {
+    "eventId": "avanpost-cmdb-test-" + str(System.Guid.NewGuid()),
+    "operation": "system.test",
+    "targetSystem": "CMDB",
+    "payload": {
+        "data": {}
+    }
+}
+
+body = json.dumps(payload)
+data = Encoding.UTF8.GetBytes(body)
+
+request = HttpWebRequest.Create(url)
+request.Method = "POST"
+request.ContentType = "application/json"
+request.Timeout = 30000
+request.ReadWriteTimeout = 30000
+request.ContentLength = data.Length
+
+stream = request.GetRequestStream()
+stream.Write(data, 0, data.Length)
+stream.Close()
+
+response = request.GetResponse()
+reader = StreamReader(response.GetResponseStream())
+result = reader.ReadToEnd()
+
+reader.Close()
+response.Close()
+
+Logger.LogDebug("idmMw response: " + result)
+
+result
+```
+
 ### 4. Настройка процессов -> Бизнес-процессы
 
 Раздел:
@@ -977,6 +1036,33 @@ curl -X POST https://<idmmw-host>:3010/webhooks/avanpost \
   }'
 ```
 
+Проверить сетевую доступность idmMw с Windows-хоста или из окружения, где
+запускается Avanpost IDM:
+
+```powershell
+$body = @{
+    eventId = "avanpost-cmdb-test-ps-002"
+    operation = "system.test"
+    targetSystem = "CMDB"
+    payload = @{
+        data = @{}
+    }
+} | ConvertTo-Json -Depth 5
+
+Invoke-WebRequest `
+    -Uri "http://idmmw:3010/webhooks/avanpost" `
+    -Method POST `
+    -ContentType "application/json" `
+    -Body $body `
+    -TimeoutSec 60 `
+    -UseBasicParsing
+```
+
+Если PowerShell проверка возвращает HTTP `201`, а скрипт IDM зависает на
+`GetResponse()` и в idmMw нет логов входящего запроса, сравните network
+namespace и DNS-резолвинг: ручная проверка должна выполняться из того же
+окружения, где работает процесс Avanpost IDM.
+
 Ожидаемый успешный ответ для write operation:
 
 ```json
@@ -1025,4 +1111,5 @@ HTTP_TLS_REJECT_UNAUTHORIZED=true
 | `received=true`, `processed=false`                        | Повторный `eventId`                                                                                   | Для нескольких целевых систем формируйте `eventId` как business event + target system.                                                             |
 | DLQ растёт                                                | Целевая система недоступна, неверный config, timeout или connector error                              | Проверьте `/metrics`, Admin UI DLQ, structured logs и `POST /admin/target-systems/<id>/test`.                                                      |
 | Read operation возвращает HTTP error                      | Read/test/sync не идут в DLQ и возвращают ошибку сразу                                                | Проверьте target system config и повторите `/idm/:targetSystem/test`.                                                                              |
+| IDM-скрипт зависает на `GetResponse()` и в idmMw нет логов | Запрос не дошёл до idmMw: неверный service DNS, порт, firewall или route из процесса IDM              | Выполните PowerShell/curl проверку из того же runtime/network namespace, где работает Avanpost IDM; используйте `http://idmmw:3010`, без точки после host. |
 | TLS handshake error                                       | Неверные `HTTP_TLS_*` или `config.tls` certificates/serverName                                        | Проверьте paths, CA chain, `serverName`, `rejectUnauthorized` и используемый `https://` URL.                                                       |

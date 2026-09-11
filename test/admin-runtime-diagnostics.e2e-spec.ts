@@ -20,6 +20,9 @@ const { AppModule } =
 const { PrismaService } = jest.requireActual<
   typeof import('../src/database/prisma.service')
 >('../src/database/prisma.service');
+const { resetRuntimeLogBufferForTests, runtimeLogBuffer } = jest.requireActual<
+  typeof import('../src/diagnostics/log-buffer')
+>('../src/diagnostics/log-buffer');
 
 interface LoginResponseBody {
   csrfToken: string;
@@ -81,10 +84,40 @@ describe('Admin runtime diagnostics auth (e2e)', () => {
     const cookies = login.headers['set-cookie'] as string[];
     const csrfToken = (login.body as LoginResponseBody).csrfToken;
 
+    resetRuntimeLogBufferForTests();
+    runtimeLogBuffer.append({
+      time: Date.now(),
+      level: 30,
+      targetSystem: 'CMDB',
+      msg: 'clear me',
+    });
+
     await request(server)
       .get('/admin/runtime/logs')
       .set('Cookie', cookies)
       .expect(200);
+
+    await request(server)
+      .delete('/admin/runtime/logs')
+      .set('Cookie', cookies)
+      .expect(403);
+
+    await request(server)
+      .delete('/admin/runtime/logs?targetSystem=CMDB')
+      .set('Cookie', cookies)
+      .set('X-CSRF-Token', csrfToken)
+      .expect(200)
+      .expect((response) => {
+        expect(response.body).toEqual({ success: true, cleared: 1 });
+      });
+
+    await request(server)
+      .get('/admin/runtime/logs?targetSystem=CMDB')
+      .set('Cookie', cookies)
+      .expect(200)
+      .expect((response) => {
+        expect(response.body).toEqual({ items: [] });
+      });
 
     await request(server)
       .post('/admin/runtime/debug')

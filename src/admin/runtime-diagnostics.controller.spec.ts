@@ -37,6 +37,14 @@ describe('RuntimeDiagnosticsController', () => {
     });
   });
 
+  it('clears buffered logs through the service boundary', () => {
+    const clearSpy = jest.spyOn(service, 'clearLogs');
+    const result = controller.clearLogs('CMDB');
+
+    expect(result).toEqual({ success: true, cleared: 0 });
+    expect(clearSpy).toHaveBeenCalledWith({ targetSystem: 'CMDB' });
+  });
+
   it('does not partially parse malformed log limits', () => {
     const logsSpy = jest.spyOn(service, 'logs');
 
