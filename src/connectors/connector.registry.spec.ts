@@ -10,6 +10,9 @@ import { CmdbuildConnectorService } from './implementations/cmdbuild-connector/c
 import { FakeConnectorService } from './implementations/fake-connector/fake-connector.service';
 import { PassworkConnectorService } from './implementations/passwork-connector/passwork-connector.service';
 import { ConsultantPlusConnectorService } from './implementations/consultant-plus-connector/consultant-plus-connector.service';
+import { PostgresRoleConnectorService } from './implementations/postgres-role-connector/postgres-role-connector.service';
+import { LinuxConnectorService } from './implementations/linux-connector/linux-connector.service';
+import { MssqlLoginConnectorService } from './implementations/mssql-login-connector/mssql-login-connector.service';
 
 type MockConnector = {
   name: string;
@@ -36,6 +39,9 @@ describe('ConnectorRegistry', () => {
   let fakeConnector: MockConnector;
   let passworkConnector: MockConnector;
   let consultantPlusConnector: MockConnector;
+  let postgresRoleConnector: MockConnector;
+  let linuxConnector: MockConnector;
+  let mssqlLoginConnector: MockConnector;
 
   beforeEach(async () => {
     prisma = {
@@ -79,6 +85,24 @@ describe('ConnectorRegistry', () => {
       testConnection: jest.fn(),
       getCapabilities: jest.fn(),
     };
+    postgresRoleConnector = {
+      name: 'postgres-role',
+      execute: jest.fn(),
+      testConnection: jest.fn(),
+      getCapabilities: jest.fn(),
+    };
+    linuxConnector = {
+      name: 'linux',
+      execute: jest.fn(),
+      testConnection: jest.fn(),
+      getCapabilities: jest.fn(),
+    };
+    mssqlLoginConnector = {
+      name: 'mssql-login',
+      execute: jest.fn(),
+      testConnection: jest.fn(),
+      getCapabilities: jest.fn(),
+    };
     const jsonHelper = {
       fromJson: jest.fn((v: unknown) =>
         typeof v === 'string' ? (JSON.parse(v) as Record<string, unknown>) : v,
@@ -118,6 +142,12 @@ describe('ConnectorRegistry', () => {
           provide: ConsultantPlusConnectorService,
           useValue: consultantPlusConnector,
         },
+        {
+          provide: PostgresRoleConnectorService,
+          useValue: postgresRoleConnector,
+        },
+        { provide: LinuxConnectorService, useValue: linuxConnector },
+        { provide: MssqlLoginConnectorService, useValue: mssqlLoginConnector },
       ],
     }).compile();
 

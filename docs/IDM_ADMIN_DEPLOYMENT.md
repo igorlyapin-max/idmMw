@@ -128,11 +128,185 @@ curl -X POST http://localhost:3010/admin/target-systems \
 - `name` - стабильный routing key для IDM; именно это значение указывается в
   `targetSystem`.
 - `type` - тип коннектора (`zabbix`, `cmdbuild`, `passwork`, `rest`, `db`,
-  `fake`, `consultant-plus` или
+  `fake`, `consultant-plus`, `postgres-role`, `mssql-login`, `linux` или
   другой зарегистрированный connector type).
 - `config` хранит параметры конкретного инстанса целевой системы.
 - После create/update/delete idmMw автоматически перезагружает registry;
   перезапуск приложения для изменения `TargetSystem.config` не нужен.
+
+PostgreSQL roles example:
+
+```bash
+curl -X POST http://localhost:3010/admin/target-systems \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "postgres-prod",
+    "type": "postgres-role",
+    "label": "PostgreSQL prod roles",
+    "config": {
+      "connectionString": "postgresql://idm_admin:REPLACE_WITH_SECRET@postgres.example.local:5432/postgres",
+      "rolePrefix": "idm_",
+      "defaultLogin": true,
+      "defaultRoles": ["app_read"],
+      "physicalDeleteEnabled": false,
+      "statementTimeoutMs": 30000,
+      "tls": {
+        "enabled": true,
+        "caPath": "/etc/idmmw/tls/postgres-ca.crt",
+        "serverName": "postgres.example.local",
+        "rejectUnauthorized": true
+      }
+    },
+    "enabled": true
+  }'
+```
+
+`postgres-role` управляет реальными PostgreSQL roles: `user.create` выполняет
+`CREATE ROLE ... LOGIN PASSWORD ...`, `user.changePassword` выполняет
+`ALTER ROLE ... PASSWORD ...`, а `user.delete` по умолчанию безопасно
+отключает вход через `NOLOGIN`. Физический `DROP ROLE` выполняется только при
+`physicalDeleteEnabled=true`.
+
+MSSQL logins example:
+
+```bash
+curl -X POST http://localhost:3010/admin/target-systems \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "mssql-prod",
+    "type": "mssql-login",
+    "label": "MSSQL prod logins",
+    "config": {
+      "connectionString": "Server=mssql.example.local,1433;Database=master;User Id=idm_admin;Password=REPLACE_WITH_SECRET;",
+      "loginPrefix": "idm_",
+      "defaultDatabase": "appdb",
+      "defaultDatabaseRoles": ["app_reader"],
+      "defaultPermissions": [
+        {
+          "action": "GRANT",
+          "permission": "SELECT",
+          "scope": "SCHEMA::dbo"
+        }
+      ],
+      "physicalDeleteEnabled": false,
+      "physicalRoleDeleteEnabled": false,
+      "statementTimeoutMs": 30000,
+      "tls": {
+        "encrypt": true,
+        "trustServerCertificate": false
+      }
+    },
+    "enabled": true
+  }'
+```
+
+`mssql-login` управляет SQL Server logins, database users, database roles и
+database permissions. `user.create` выполняет `CREATE LOGIN`, `CREATE USER`,
+назначает роли через `ALTER ROLE ... ADD MEMBER` и применяет `GRANT`, `DENY`
+или `REVOKE` для scopes `DATABASE`, `SCHEMA::<name>` и
+`OBJECT::<schema>.<object>`. `user.delete` по умолчанию безопасно отключает
+login через `ALTER LOGIN ... DISABLE`; физический `DROP USER`/`DROP LOGIN`
+выполняется только при `physicalDeleteEnabled=true`. `group.delete` выполняет
+`DROP ROLE` только при `physicalRoleDeleteEnabled=true`.
+
+Пример payload для назначения ролей и прав:
+
+```json
+{
+  "eventId": "idm-mssql-create-001",
+  "operation": "user.create",
+  "targetSystem": "mssql-prod",
+  "payload": {
+    "data": {
+      "login": "ivanov",
+      "password": "REPLACE_WITH_PASSWORD_FROM_IDM",
+      "database": "appdb",
+      "roles": ["app_writer"],
+      "permissions": [
+        {
+          "action": "GRANT",
+          "permission": "UPDATE",
+          "scope": "OBJECT::dbo.Customer"
+        }
+      ]
+    }
+  }
+}
+```
+
+Для локальной live-проверки можно подготовить отдельный SQL Server Developer
+container `idmmw-mssql-target` и `TargetSystem(name=mssql-docker-login,
+type=mssql-login)`. После проверки подготовленные image/container/volume не
+удаляйте, чтобы использовать их для последующих регрессий.
+
+Linux via SSH sudo example:
+
+```bash
+curl -X POST http://localhost:3010/admin/target-systems \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "linux-prod-ssh",
+    "type": "linux",
+    "label": "Linux prod via SSH sudo",
+    "config": {
+      "provider": "ssh-sudo",
+      "host": "linux.example.local",
+      "port": 22,
+      "username": "idm",
+      "privateKey": "REPLACE_WITH_PRIVATE_KEY_OR_SECRET_VALUE",
+      "hostFingerprint": "SHA256:REPLACE_WITH_HOST_KEY_FINGERPRINT",
+      "sudoMode": "passwordless",
+      "defaultShell": "/bin/bash",
+      "defaultHomeBase": "/home",
+      "defaultGroups": ["users"],
+      "physicalDeleteEnabled": false,
+      "timeoutMs": 30000
+    },
+    "enabled": true
+  }'
+```
+
+Linux via remote agent example:
+
+```bash
+curl -X POST http://localhost:3010/admin/target-systems \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "linux-prod-agent",
+    "type": "linux",
+    "label": "Linux prod via remote agent",
+    "config": {
+      "provider": "remote-agent",
+      "baseUrl": "https://linux-agent.example.local",
+      "apiToken": "REPLACE_WITH_SECRET",
+      "allowedHosts": ["linux-agent.example.local"],
+      "defaultShell": "/bin/bash",
+      "defaultHomeBase": "/home",
+      "defaultGroups": ["users"],
+      "physicalDeleteEnabled": false,
+      "timeoutMs": 30000,
+      "tls": {
+        "enabled": true,
+        "caPath": "/etc/idmmw/tls/linux-agent-ca.crt",
+        "serverName": "linux-agent.example.local",
+        "rejectUnauthorized": true
+      }
+    },
+    "enabled": true
+  }'
+```
+
+`linux` принимает пароль из IDM для `user.create` и `user.changePassword`.
+`provider=ssh-sudo` выполняет только allowlisted lifecycle-команды через SSH,
+требует `sudoMode=passwordless` и pinned `hostFingerprint`. Пароли для
+`chpasswd` передаются через stdin SSH stream и не должны появляться в command
+line. `provider=remote-agent` вызывает HTTP agent endpoints `/health`,
+`/schema`, `/users`, `/users/{login}`,
+`/users/{login}/password`, `/users/{login}/disable`,
+`/users/{login}/enable`. При `apiToken` remote-agent требует `https://` и
+`allowedHosts`; redirects с bearer token отключаются. `user.delete` по
+умолчанию блокирует и истекает УЗ; `userdel` выполняется только при
+`physicalDeleteEnabled=true`.
 
 ConsultantPlus example:
 
@@ -452,14 +626,14 @@ State-changing запросы (`POST`, `PATCH`, `DELETE`) должны пере�
 
 Быстрая карта экранов, которые должен пройти администратор IDM:
 
-| Экран Avanpost IDM                                         | Что настраивается для idmMw                                                                                  | Обязательно |
-| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ | ----------- |
-| `Интеграции -> Целевые системы`                            | Ресурс управляемой системы, профиль, права, периоды недоступности и очередь запросов ресурса.                | Да          |
-| `Интеграции -> Целевые системы -> <ресурс> -> Добавить профиль` | Шаблон учётной записи и атрибуты, которые попадут в `payload.data`.                                          | Да          |
-| `Настройка процессов -> Скрипты`                           | Функция обращения к внешнему сервису, которая отправляет `POST /webhooks/avanpost`.                          | Да          |
-| `Настройка процессов -> Бизнес-процессы`                   | Маршрут заявки или операции, где сервисный блок вызывает скрипт обращения к idmMw.                           | Да          |
-| `Обработка событий`                                        | Handler, который запускает БП или документ по событию IDM: создание, изменение, блокировка или удаление УЗ.  | Если event-driven |
-| `Интеграции -> Сервисы коннекторов`                        | Native Avanpost connector service. Для текущего HTTP middleware flow не является основным путём настройки.   | Нет         |
+| Экран Avanpost IDM                                              | Что настраивается для idmMw                                                                                 | Обязательно       |
+| --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- | ----------------- |
+| `Интеграции -> Целевые системы`                                 | Ресурс управляемой системы, профиль, права, периоды недоступности и очередь запросов ресурса.               | Да                |
+| `Интеграции -> Целевые системы -> <ресурс> -> Добавить профиль` | Шаблон учётной записи и атрибуты, которые попадут в `payload.data`.                                         | Да                |
+| `Настройка процессов -> Скрипты`                                | Функция обращения к внешнему сервису, которая отправляет `POST /webhooks/avanpost`.                         | Да                |
+| `Настройка процессов -> Бизнес-процессы`                        | Маршрут заявки или операции, где сервисный блок вызывает скрипт обращения к idmMw.                          | Да                |
+| `Обработка событий`                                             | Handler, который запускает БП или документ по событию IDM: создание, изменение, блокировка или удаление УЗ. | Если event-driven |
+| `Интеграции -> Сервисы коннекторов`                             | Native Avanpost connector service. Для текущего HTTP middleware flow не является основным путём настройки.  | Нет               |
 
 Минимальная рабочая цепочка:
 
@@ -473,13 +647,13 @@ State-changing запросы (`POST`, `PATCH`, `DELETE`) должны пере�
 
 Контрольные значения, которые должны совпасть между IDM и idmMw:
 
-| Значение                      | Где задаётся                         | Где используется в webhook                                              |
-| ----------------------------- | ------------------------------------ | ----------------------------------------------------------------------- |
-| `TargetSystem.name`           | idmMw Admin UI/API                   | `targetSystem`                                                          |
-| ID заявки или процесса        | Avanpost IDM                         | Часть `eventId`, например `request-123:zabbix-prod`                     |
-| Операция provisioning         | Скрипт, БП или handler Avanpost IDM  | `operation`, например `user.create`, `user.disable`, `user.delete`      |
-| Логин, email, ФИО, группы     | Профиль ресурса, заявка или HR model | `payload.data`                                                          |
-| Секреты целевой системы       | Только `TargetSystem.config` в idmMw | В webhook не передаются                                                 |
+| Значение                  | Где задаётся                         | Где используется в webhook                                         |
+| ------------------------- | ------------------------------------ | ------------------------------------------------------------------ |
+| `TargetSystem.name`       | idmMw Admin UI/API                   | `targetSystem`                                                     |
+| ID заявки или процесса    | Avanpost IDM                         | Часть `eventId`, например `request-123:zabbix-prod`                |
+| Операция provisioning     | Скрипт, БП или handler Avanpost IDM  | `operation`, например `user.create`, `user.disable`, `user.delete` |
+| Логин, email, ФИО, группы | Профиль ресурса, заявка или HR model | `payload.data`                                                     |
+| Секреты целевой системы   | Только `TargetSystem.config` в idmMw | В webhook не передаются                                            |
 
 ### 1. Интеграции -> Целевые системы
 
@@ -1104,12 +1278,12 @@ HTTP_TLS_REJECT_UNAUTHORIZED=true
 
 ## Troubleshooting
 
-| Симптом                                                   | Возможная причина                                                                                     | Проверка и действие                                                                                                                                |
-| --------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `operation must be one of...` или HTTP 400                | IDM отправил неизвестный `operation`                                                                  | Сверьте operation со списком выше и enum Avanpost IDM. Для Mock IDM используйте route name в формате operation kebab-case, например `user-create`. |
-| `Unsupported target system` или `Target system not found` | `targetSystem` не совпадает с enabled `TargetSystem.name` или connector registry не содержит этот тип | Проверьте `GET /idm/target-systems`, `GET /admin/target-systems` и поле `enabled`.                                                                 |
-| `received=true`, `processed=false`                        | Повторный `eventId`                                                                                   | Для нескольких целевых систем формируйте `eventId` как business event + target system.                                                             |
-| DLQ растёт                                                | Целевая система недоступна, неверный config, timeout или connector error                              | Проверьте `/metrics`, Admin UI DLQ, structured logs и `POST /admin/target-systems/<id>/test`.                                                      |
-| Read operation возвращает HTTP error                      | Read/test/sync не идут в DLQ и возвращают ошибку сразу                                                | Проверьте target system config и повторите `/idm/:targetSystem/test`.                                                                              |
+| Симптом                                                    | Возможная причина                                                                                     | Проверка и действие                                                                                                                                        |
+| ---------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `operation must be one of...` или HTTP 400                 | IDM отправил неизвестный `operation`                                                                  | Сверьте operation со списком выше и enum Avanpost IDM. Для Mock IDM используйте route name в формате operation kebab-case, например `user-create`.         |
+| `Unsupported target system` или `Target system not found`  | `targetSystem` не совпадает с enabled `TargetSystem.name` или connector registry не содержит этот тип | Проверьте `GET /idm/target-systems`, `GET /admin/target-systems` и поле `enabled`.                                                                         |
+| `received=true`, `processed=false`                         | Повторный `eventId`                                                                                   | Для нескольких целевых систем формируйте `eventId` как business event + target system.                                                                     |
+| DLQ растёт                                                 | Целевая система недоступна, неверный config, timeout или connector error                              | Проверьте `/metrics`, Admin UI DLQ, structured logs и `POST /admin/target-systems/<id>/test`.                                                              |
+| Read operation возвращает HTTP error                       | Read/test/sync не идут в DLQ и возвращают ошибку сразу                                                | Проверьте target system config и повторите `/idm/:targetSystem/test`.                                                                                      |
 | IDM-скрипт зависает на `GetResponse()` и в idmMw нет логов | Запрос не дошёл до idmMw: неверный service DNS, порт, firewall или route из процесса IDM              | Выполните PowerShell/curl проверку из того же runtime/network namespace, где работает Avanpost IDM; используйте `http://idmmw:3010`, без точки после host. |
-| TLS handshake error                                       | Неверные `HTTP_TLS_*` или `config.tls` certificates/serverName                                        | Проверьте paths, CA chain, `serverName`, `rejectUnauthorized` и используемый `https://` URL.                                                       |
+| TLS handshake error                                        | Неверные `HTTP_TLS_*` или `config.tls` certificates/serverName                                        | Проверьте paths, CA chain, `serverName`, `rejectUnauthorized` и используемый `https://` URL.                                                               |

@@ -2,7 +2,7 @@ export const SECRET_REDACTION_CENSOR = '[REDACTED]';
 export const MASKED_SECRET_VALUE = '***';
 
 const SECRET_KEY_RE =
-  /(^|[_\-.])(password|passwd|pwd|token|secret|authorization|cookie|credential|api[-_]?key|apiKey|api[-_]?token|apiToken|access[-_]?token|accessToken|refresh[-_]?token|refreshToken|master[-_]?key|masterKey|master[-_]?key[-_]?hash|masterKeyHash|private[-_]?key|privateKey|wallet[-_]?password|walletPassword|cert|ca|pem|key|new[-_]?value|newValue|old[-_]?value|oldValue|value)$/i;
+  /(^|[_\-.])(password|passwd|pwd|token|secret|authorization|cookie|credential|connection[-_]?string|connectionString|api[-_]?key|apiKey|api[-_]?token|apiToken|access[-_]?token|accessToken|refresh[-_]?token|refreshToken|master[-_]?key|masterKey|master[-_]?key[-_]?hash|masterKeyHash|private[-_]?key|privateKey|wallet[-_]?password|walletPassword|cert|ca|pem|key|new[-_]?value|newValue|old[-_]?value|oldValue|value)$/i;
 
 const MASKED_PLACEHOLDERS = new Set([
   MASKED_SECRET_VALUE,

@@ -17,6 +17,9 @@ import { CmdbuildConnectorService } from './implementations/cmdbuild-connector/c
 import { FakeConnectorService } from './implementations/fake-connector/fake-connector.service';
 import { PassworkConnectorService } from './implementations/passwork-connector/passwork-connector.service';
 import { ConsultantPlusConnectorService } from './implementations/consultant-plus-connector/consultant-plus-connector.service';
+import { PostgresRoleConnectorService } from './implementations/postgres-role-connector/postgres-role-connector.service';
+import { LinuxConnectorService } from './implementations/linux-connector/linux-connector.service';
+import { MssqlLoginConnectorService } from './implementations/mssql-login-connector/mssql-login-connector.service';
 import { PrismaService } from '../database/prisma.service';
 import { JsonHelper } from '../database/json.helper';
 
@@ -105,6 +108,9 @@ export class ConnectorRegistry implements OnModuleInit, OnModuleDestroy {
     private readonly fakeConnector: FakeConnectorService,
     private readonly passworkConnector: PassworkConnectorService,
     private readonly consultantPlusConnector: ConsultantPlusConnectorService,
+    private readonly postgresRoleConnector: PostgresRoleConnectorService,
+    private readonly linuxConnector: LinuxConnectorService,
+    private readonly mssqlLoginConnector: MssqlLoginConnectorService,
   ) {
     // Register static blueprints at startup.
     this.registerStatic(this.restConnector);
@@ -114,6 +120,9 @@ export class ConnectorRegistry implements OnModuleInit, OnModuleDestroy {
     this.registerStatic(this.fakeConnector);
     this.registerStatic(this.passworkConnector);
     this.registerStatic(this.consultantPlusConnector);
+    this.registerStatic(this.postgresRoleConnector);
+    this.registerStatic(this.linuxConnector);
+    this.registerStatic(this.mssqlLoginConnector);
   }
 
   /** Load dynamic proxies from DB on application startup. */

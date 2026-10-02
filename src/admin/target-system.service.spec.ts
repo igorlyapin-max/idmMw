@@ -65,11 +65,16 @@ describe('TargetSystemService', () => {
           id: '1',
           name: 'z1',
           type: 'zabbix',
-          config: '{"a":1,"apiToken":"secret"}',
+          config:
+            '{"a":1,"apiToken":"secret","connectionString":"Server=sql;Password=secret;"}',
         },
       ]);
       const result = await service.findAll({});
-      expect(result[0].config).toEqual({ a: 1, apiToken: '***' });
+      expect(result[0].config).toEqual({
+        a: 1,
+        apiToken: '***',
+        connectionString: '***',
+      });
     });
   });
 
@@ -151,6 +156,26 @@ describe('TargetSystemService', () => {
       expect(jsonHelper.toJson).toHaveBeenCalledWith({
         password: rotatedCredential,
         url: 'http://new',
+      });
+    });
+
+    it('should preserve current connection string when update sends masked placeholder', async () => {
+      prisma.targetSystem.findUnique.mockResolvedValue({
+        id: '1',
+        config: JSON.stringify({
+          connectionString: 'Server=sql;User Id=sa;Password=Secret;',
+          label: 'old',
+        }),
+      });
+      prisma.targetSystem.update.mockResolvedValue({ id: '1' });
+
+      await service.update('1', {
+        config: { connectionString: '***', label: 'new' },
+      });
+
+      expect(jsonHelper.toJson).toHaveBeenCalledWith({
+        connectionString: 'Server=sql;User Id=sa;Password=Secret;',
+        label: 'new',
       });
     });
 

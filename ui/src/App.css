@@ -276,6 +276,28 @@ input[type='checkbox'] {
   background: var(--color-danger-bg);
 }
 
+.badge.trace,
+.badge.debug {
+  color: var(--color-text-muted);
+  background: var(--color-muted-bg);
+}
+
+.badge.info {
+  color: var(--color-info);
+  background: var(--color-info-bg);
+}
+
+.badge.warn {
+  color: var(--color-warning);
+  background: var(--color-warning-bg);
+}
+
+.badge.error,
+.badge.fatal {
+  color: var(--color-danger);
+  background: var(--color-danger-bg);
+}
+
 .truncate {
   max-width: 360px;
   overflow: hidden;
@@ -453,15 +475,63 @@ input[type='checkbox'] {
   gap: 8px;
   max-height: min(520px, calc(100vh - 220px));
   overflow: auto;
+  padding: 8px;
   border: 1px solid var(--color-border);
   background: var(--color-bg);
 }
 
-.log-line {
+.log-entry {
   min-width: 680px;
+  padding: 10px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+
+.log-entry-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.log-entry-time {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
+.log-entry-target {
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.log-entry-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+  font-size: 13px;
+}
+
+.log-entry-http {
+  color: var(--color-text-muted);
+  font-family:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono',
+    monospace;
+}
+
+.log-entry-details {
+  margin-top: 6px;
+  font-size: 12px;
+}
+
+.log-entry-details summary {
+  cursor: pointer;
+  color: var(--color-text-muted);
+}
+
+.log-line {
   margin: 0;
-  padding: 8px;
-  border-bottom: 1px solid var(--color-border);
+  padding: 8px 0 0;
   color: var(--color-text);
   font-size: 12px;
   line-height: 1.45;

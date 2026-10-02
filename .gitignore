@@ -36,6 +36,8 @@ pnpm-debug.log*
 *.swo
 
 # Local dev / agent tooling
+AGENTS.md
+.tmp/
 .agents/
 .omk/
 .kimi/runs/

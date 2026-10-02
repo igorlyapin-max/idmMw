@@ -9,6 +9,9 @@ import { CmdbuildConnectorService } from './implementations/cmdbuild-connector/c
 import { FakeConnectorService } from './implementations/fake-connector/fake-connector.service';
 import { PassworkConnectorService } from './implementations/passwork-connector/passwork-connector.service';
 import { ConsultantPlusConnectorService } from './implementations/consultant-plus-connector/consultant-plus-connector.service';
+import { PostgresRoleConnectorService } from './implementations/postgres-role-connector/postgres-role-connector.service';
+import { LinuxConnectorService } from './implementations/linux-connector/linux-connector.service';
+import { MssqlLoginConnectorService } from './implementations/mssql-login-connector/mssql-login-connector.service';
 
 @Module({
   imports: [HttpModule, PrismaModule],
@@ -21,6 +24,9 @@ import { ConsultantPlusConnectorService } from './implementations/consultant-plu
     FakeConnectorService,
     PassworkConnectorService,
     ConsultantPlusConnectorService,
+    PostgresRoleConnectorService,
+    LinuxConnectorService,
+    MssqlLoginConnectorService,
   ],
   exports: [ConnectorRegistry],
 })

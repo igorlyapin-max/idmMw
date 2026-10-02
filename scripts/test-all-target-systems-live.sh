@@ -498,6 +498,148 @@ test_db() {
   report_step "$target" "db" "passed" "Inserted DB target user row" "{\"targetSystemId\":\"${target_id}\",\"username\":\"${username}\",\"dbPath\":\"${TARGET_DB_PATH}\",\"row\":${row}}"
 }
 
+test_postgres_role() {
+  local target="postgres-role-live-${RUN_ID}"
+  local login
+  login="$(live_username "idmpg_" 63)"
+  if [ -z "${POSTGRES_ROLE_CONNECTION_STRING:-}" ]; then
+    report_step "$target" "postgres-role" "blocked" "POSTGRES_ROLE_CONNECTION_STRING is not set" "{}"
+    return 0
+  fi
+
+  node -e '
+const fs = require("fs");
+const [out, connectionString] = process.argv.slice(1);
+fs.writeFileSync(out, JSON.stringify({
+  connectionString,
+  rolePrefix: "",
+  defaultLogin: true,
+  physicalDeleteEnabled: false,
+  statementTimeoutMs: 30000,
+}));
+' "$TMP_DIR/postgres-role-config.json" "$POSTGRES_ROLE_CONNECTION_STRING"
+  local target_id
+  target_id="$(create_target_system "$target" "postgres-role" "Live PostgreSQL Role Target" "$TMP_DIR/postgres-role-config.json")"
+  if ! idm_json POST "/admin/target-systems/${target_id}/test" "" "$TMP_DIR/postgres-role-test.json"; then
+    report_step "$target" "postgres-role" "blocked" "PostgreSQL role TargetSystem test failed" "{\"targetSystemId\":\"${target_id}\"}"
+    return 0
+  fi
+  if ! json_get "$TMP_DIR/postgres-role-test.json" "value.success === true" >/dev/null; then
+    report_step "$target" "postgres-role" "blocked" "PostgreSQL role TargetSystem test returned success=false" "{\"targetSystemId\":\"${target_id}\"}"
+    return 0
+  fi
+
+  write_json "$TMP_DIR/postgres-role-user.json" "{\"login\":\"${login}\",\"password\":\"Postgres-${RUN_ID}-Password1!\"}"
+  write_json "$TMP_DIR/postgres-role-params.json" "{\"id\":\"${login}\"}"
+  write_json "$TMP_DIR/empty.json" "{}"
+  if webhook_json "$target" "user.create" "$TMP_DIR/postgres-role-user.json" "$TMP_DIR/empty.json" "$TMP_DIR/empty.json" "$TMP_DIR/postgres-role-create.json" &&
+    webhook_json "$target" "user.get" "$TMP_DIR/empty.json" "$TMP_DIR/postgres-role-params.json" "$TMP_DIR/empty.json" "$TMP_DIR/postgres-role-get.json" &&
+    webhook_json "$target" "user.delete" "$TMP_DIR/empty.json" "$TMP_DIR/postgres-role-params.json" "$TMP_DIR/empty.json" "$TMP_DIR/postgres-role-delete.json"; then
+    report_step "$target" "postgres-role" "passed" "Created, read and safe-disabled PostgreSQL role" "{\"targetSystemId\":\"${target_id}\",\"login\":\"${login}\"}"
+  else
+    report_step "$target" "postgres-role" "failed" "PostgreSQL role lifecycle failed" "{\"targetSystemId\":\"${target_id}\",\"login\":\"${login}\"}"
+  fi
+}
+
+test_linux() {
+  local target="linux-live-${RUN_ID}"
+  local login
+  login="$(live_username "idmlinux" 32)"
+  if [ -z "${LINUX_SSH_HOST:-}" ] || [ -z "${LINUX_SSH_USERNAME:-}" ] || [ -z "${LINUX_SSH_PRIVATE_KEY_FILE:-}" ] || [ -z "${LINUX_SSH_HOST_FINGERPRINT:-}" ]; then
+    report_step "$target" "linux" "blocked" "Linux SSH live env is incomplete" "{\"required\":\"LINUX_SSH_HOST, LINUX_SSH_USERNAME, LINUX_SSH_PRIVATE_KEY_FILE, LINUX_SSH_HOST_FINGERPRINT\"}"
+    return 0
+  fi
+  if [ ! -s "$LINUX_SSH_PRIVATE_KEY_FILE" ]; then
+    report_step "$target" "linux" "blocked" "LINUX_SSH_PRIVATE_KEY_FILE does not exist or is empty" "{\"privateKeyFile\":\"${LINUX_SSH_PRIVATE_KEY_FILE}\"}"
+    return 0
+  fi
+
+  node -e '
+const fs = require("fs");
+const [out, host, port, username, privateKeyFile, hostFingerprint] = process.argv.slice(1);
+fs.writeFileSync(out, JSON.stringify({
+  provider: "ssh-sudo",
+  host,
+  port: Number(port || "22"),
+  username,
+  privateKey: fs.readFileSync(privateKeyFile, "utf8"),
+  hostFingerprint,
+  sudoMode: "passwordless",
+  physicalDeleteEnabled: false,
+  timeoutMs: 30000,
+}));
+' "$TMP_DIR/linux-config.json" "$LINUX_SSH_HOST" "${LINUX_SSH_PORT:-22}" "$LINUX_SSH_USERNAME" "$LINUX_SSH_PRIVATE_KEY_FILE" "$LINUX_SSH_HOST_FINGERPRINT"
+  local target_id
+  target_id="$(create_target_system "$target" "linux" "Live Linux SSH Target" "$TMP_DIR/linux-config.json")"
+  if ! idm_json POST "/admin/target-systems/${target_id}/test" "" "$TMP_DIR/linux-test.json"; then
+    report_step "$target" "linux" "blocked" "Linux TargetSystem test failed" "{\"targetSystemId\":\"${target_id}\",\"host\":\"${LINUX_SSH_HOST}\"}"
+    return 0
+  fi
+  if ! json_get "$TMP_DIR/linux-test.json" "value.success === true" >/dev/null; then
+    report_step "$target" "linux" "blocked" "Linux TargetSystem test returned success=false" "{\"targetSystemId\":\"${target_id}\",\"host\":\"${LINUX_SSH_HOST}\"}"
+    return 0
+  fi
+
+  write_json "$TMP_DIR/linux-user.json" "{\"login\":\"${login}\",\"password\":\"Linux-${RUN_ID}-Password1!\"}"
+  write_json "$TMP_DIR/linux-params.json" "{\"id\":\"${login}\"}"
+  write_json "$TMP_DIR/empty.json" "{}"
+  if webhook_json "$target" "user.create" "$TMP_DIR/linux-user.json" "$TMP_DIR/empty.json" "$TMP_DIR/empty.json" "$TMP_DIR/linux-create.json" &&
+    webhook_json "$target" "user.get" "$TMP_DIR/empty.json" "$TMP_DIR/linux-params.json" "$TMP_DIR/empty.json" "$TMP_DIR/linux-get.json" &&
+    webhook_json "$target" "user.delete" "$TMP_DIR/empty.json" "$TMP_DIR/linux-params.json" "$TMP_DIR/empty.json" "$TMP_DIR/linux-delete.json"; then
+    report_step "$target" "linux" "passed" "Created, read and safe-disabled Linux user" "{\"targetSystemId\":\"${target_id}\",\"login\":\"${login}\",\"host\":\"${LINUX_SSH_HOST}\"}"
+  else
+    report_step "$target" "linux" "failed" "Linux lifecycle failed" "{\"targetSystemId\":\"${target_id}\",\"login\":\"${login}\",\"host\":\"${LINUX_SSH_HOST}\"}"
+  fi
+}
+
+test_mssql_login() {
+  local target="mssql-login-live-${RUN_ID}"
+  local login
+  login="$(live_username "idmsql_" 64)"
+  if [ -z "${MSSQL_LOGIN_CONNECTION_STRING:-}" ]; then
+    report_step "$target" "mssql-login" "blocked" "MSSQL_LOGIN_CONNECTION_STRING is not set" "{}"
+    return 0
+  fi
+
+  node -e '
+const fs = require("fs");
+const [out, connectionString, database] = process.argv.slice(1);
+fs.writeFileSync(out, JSON.stringify({
+  connectionString,
+  loginPrefix: "",
+  defaultDatabase: database || "master",
+  physicalDeleteEnabled: false,
+  physicalRoleDeleteEnabled: false,
+  statementTimeoutMs: 30000,
+  tls: {
+    encrypt: true,
+    trustServerCertificate: false,
+  },
+}));
+' "$TMP_DIR/mssql-login-config.json" "$MSSQL_LOGIN_CONNECTION_STRING" "${MSSQL_LOGIN_DATABASE:-master}"
+  local target_id
+  target_id="$(create_target_system "$target" "mssql-login" "Live MSSQL Login Target" "$TMP_DIR/mssql-login-config.json")"
+  if ! idm_json POST "/admin/target-systems/${target_id}/test" "" "$TMP_DIR/mssql-login-test.json"; then
+    report_step "$target" "mssql-login" "blocked" "MSSQL login TargetSystem test failed" "{\"targetSystemId\":\"${target_id}\"}"
+    return 0
+  fi
+  if ! json_get "$TMP_DIR/mssql-login-test.json" "value.success === true" >/dev/null; then
+    report_step "$target" "mssql-login" "blocked" "MSSQL login TargetSystem test returned success=false" "{\"targetSystemId\":\"${target_id}\"}"
+    return 0
+  fi
+
+  write_json "$TMP_DIR/mssql-login-user.json" "{\"login\":\"${login}\",\"password\":\"Mssql-${RUN_ID}-Password1!\"}"
+  write_json "$TMP_DIR/mssql-login-params.json" "{\"id\":\"${login}\"}"
+  write_json "$TMP_DIR/empty.json" "{}"
+  if webhook_json "$target" "user.create" "$TMP_DIR/mssql-login-user.json" "$TMP_DIR/empty.json" "$TMP_DIR/empty.json" "$TMP_DIR/mssql-login-create.json" &&
+    webhook_json "$target" "user.get" "$TMP_DIR/empty.json" "$TMP_DIR/mssql-login-params.json" "$TMP_DIR/empty.json" "$TMP_DIR/mssql-login-get.json" &&
+    webhook_json "$target" "user.delete" "$TMP_DIR/empty.json" "$TMP_DIR/mssql-login-params.json" "$TMP_DIR/empty.json" "$TMP_DIR/mssql-login-delete.json"; then
+    report_step "$target" "mssql-login" "passed" "Created, read and safe-disabled MSSQL login" "{\"targetSystemId\":\"${target_id}\",\"login\":\"${login}\"}"
+  else
+    report_step "$target" "mssql-login" "failed" "MSSQL login lifecycle failed" "{\"targetSystemId\":\"${target_id}\",\"login\":\"${login}\"}"
+  fi
+}
+
 test_zabbix() {
   local base_url="${ZABBIX_BASE_URL:-http://127.0.0.1:8081}"
   local username="${ZABBIX_USERNAME:-Admin}"
@@ -628,7 +770,10 @@ test_rest
 echo "[8/10] Testing DB target"
 test_db
 
-echo "[9/10] Testing external target systems when reachable"
+echo "[9/10] Testing connector-backed target systems when reachable"
+test_postgres_role
+test_linux
+test_mssql_login
 test_zabbix
 test_cmdbuild
 test_passwork

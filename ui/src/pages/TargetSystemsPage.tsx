@@ -461,18 +461,58 @@ function formatExtraConfigValue(key: string, value: unknown): string {
   }
 }
 
+const RUNTIME_LOG_DATE_FORMATTER = new Intl.DateTimeFormat('ru-RU', {
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  hour12: false,
+});
+
 function formatRuntimeReceivedAt(value: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString();
+  const base = RUNTIME_LOG_DATE_FORMATTER.format(date)
+    .replace(',', '')
+    .replace(/\s+/g, ' ');
+  return `${base}.${String(date.getMilliseconds()).padStart(3, '0')}`;
 }
 
-function formatRuntimeLogEvent(item: RuntimeLogEvent): string {
+function runtimeLogLevelName(level: RuntimeLogEvent['level']): string {
+  if (typeof level === 'string') return level;
+  const names: Record<number, string> = {
+    10: 'trace',
+    20: 'debug',
+    30: 'info',
+    40: 'warn',
+    50: 'error',
+    60: 'fatal',
+  };
+  return names[level] ?? String(level);
+}
+
+function runtimeLogTitle(item: RuntimeLogEvent): string {
+  return item.event ?? item.msg ?? item.context ?? `log #${item.id}`;
+}
+
+function runtimeLogHttpSummary(item: RuntimeLogEvent): string | undefined {
+  const parts = [
+    item.method,
+    item.path,
+    item.status === undefined ? undefined : String(item.status),
+    item.responseTime === undefined ? undefined : `${item.responseTime}ms`,
+  ].filter(Boolean);
+  return parts.length ? parts.join(' ') : undefined;
+}
+
+function formatRuntimeLogDetails(item: RuntimeLogEvent): string {
   return JSON.stringify(
     {
       id: item.id,
-      time: item.time,
-      receivedAt: item.receivedAt,
+      timeEpochMs: item.time,
+      receivedAtUtc: item.receivedAt,
       receivedAtLocal: formatRuntimeReceivedAt(item.receivedAt),
       level: item.level,
       msg: item.msg,
@@ -488,6 +528,33 @@ function formatRuntimeLogEvent(item: RuntimeLogEvent): string {
     },
     null,
     2,
+  );
+}
+
+function RuntimeLogEntry({ item }: { item: RuntimeLogEvent }) {
+  const httpSummary = runtimeLogHttpSummary(item);
+  return (
+    <article className="log-entry">
+      <div className="log-entry-header">
+        <time className="log-entry-time" dateTime={item.receivedAt}>
+          {formatRuntimeReceivedAt(item.receivedAt)}
+        </time>
+        <span className={`badge ${runtimeLogLevelName(item.level)}`}>
+          {runtimeLogLevelName(item.level)}
+        </span>
+        {item.targetSystem && (
+          <span className="log-entry-target">{item.targetSystem}</span>
+        )}
+      </div>
+      <div className="log-entry-summary">
+        <span>{runtimeLogTitle(item)}</span>
+        {httpSummary && <span className="log-entry-http">{httpSummary}</span>}
+      </div>
+      <details className="log-entry-details">
+        <summary>Details</summary>
+        <pre className="log-line">{formatRuntimeLogDetails(item)}</pre>
+      </details>
+    </article>
   );
 }
 
@@ -1282,11 +1349,7 @@ export function TargetSystemsPage() {
                   No buffered logs for this target system.
                 </div>
               ) : (
-                logs.map((item) => (
-                  <pre className="log-line" key={item.id}>
-                    {formatRuntimeLogEvent(item)}
-                  </pre>
-                ))
+                logs.map((item) => <RuntimeLogEntry item={item} key={item.id} />)
               )}
             </div>
           </div>

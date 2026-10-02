@@ -11,13 +11,17 @@ import type {
 export function createConnectorCapabilities(
   partialOperations: Record<string, string> = {},
   capabilityOverrides: Partial<ConnectorCapabilities['capabilities']> = {},
+  unsupportedOperations: Record<string, string> = {},
 ): ConnectorCapabilities {
   const operationStatus = Object.fromEntries(
     AVANPOST_OPERATION_VALUES.map((operation) => {
-      const reason = partialOperations[operation];
-      const capability: ConnectorOperationCapability = reason
-        ? { status: 'partial', reason }
-        : { status: 'implemented' };
+      const unsupportedReason = unsupportedOperations[operation];
+      const partialReason = partialOperations[operation];
+      const capability: ConnectorOperationCapability = unsupportedReason
+        ? { status: 'unsupported', reason: unsupportedReason }
+        : partialReason
+          ? { status: 'partial', reason: partialReason }
+          : { status: 'implemented' };
       return [operation, capability];
     }),
   ) as Record<string, ConnectorOperationCapability>;

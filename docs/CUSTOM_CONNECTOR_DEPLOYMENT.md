@@ -26,7 +26,7 @@
 
 | Компонент  | Версия        |
 | ---------- | ------------- |
-| Node.js    | 20+           |
+| Node.js    | 22+           |
 | NestJS     | 11+           |
 | TypeScript | strict        |
 | Prisma     | latest        |
