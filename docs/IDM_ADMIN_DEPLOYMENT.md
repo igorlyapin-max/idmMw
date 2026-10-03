@@ -146,9 +146,28 @@ curl -X POST http://localhost:3010/admin/target-systems \
     "config": {
       "connectionString": "postgresql://idm_admin:REPLACE_WITH_SECRET@postgres.example.local:5432/postgres",
       "rolePrefix": "idm_",
+      "managedRolePrefix": "app_",
+      "rolePolicyMode": "managed-namespace",
+      "permissionPolicyMode": "managed-allowlist",
+      "defaultDatabase": "appdb",
       "defaultLogin": true,
       "defaultRoles": ["app_read"],
+      "defaultPermissions": [
+        {
+          "action": "GRANT",
+          "permission": "SELECT",
+          "scope": "SCHEMA::public"
+        }
+      ],
+      "allowedPermissions": [
+        {
+          "action": "GRANT",
+          "permission": "UPDATE",
+          "scope": "TABLE::public.customer"
+        }
+      ],
       "physicalDeleteEnabled": false,
+      "physicalRoleDeleteEnabled": false,
       "statementTimeoutMs": 30000,
       "tls": {
         "enabled": true,
@@ -165,7 +184,85 @@ curl -X POST http://localhost:3010/admin/target-systems \
 `CREATE ROLE ... LOGIN PASSWORD ...`, `user.changePassword` выполняет
 `ALTER ROLE ... PASSWORD ...`, а `user.delete` по умолчанию безопасно
 отключает вход через `NOLOGIN`. Физический `DROP ROLE` выполняется только при
-`physicalDeleteEnabled=true`.
+`physicalDeleteEnabled=true`. `group.create` создаёт group role через
+`CREATE ROLE ... NOLOGIN`; `group.addMember` и `group.removeMember` выполняют
+`GRANT <role> TO <login>` и `REVOKE <role> FROM <login>`. `group.delete`
+выполняет `DROP ROLE` только при `physicalRoleDeleteEnabled=true`.
+
+`postgres-role` применяет `defaultRoles` и `defaultPermissions` только при
+`user.create`. Для `user.update` применяются только `payload.data.roles` и
+`payload.data.permissions`.
+
+По умолчанию connector работает в безопасном режиме:
+
+- `rolePolicyMode=managed-namespace` разрешает IDM назначать только роли,
+  начинающиеся с `managedRolePrefix`, а если он не задан - с `rolePrefix`, а
+  если оба не заданы - с `idm_`.
+- `permissionPolicyMode=managed-allowlist` разрешает payload permissions только
+  из `defaultPermissions` и `allowedPermissions`.
+- `group.search` возвращает только роли из управляемого namespace, а не все
+  PostgreSQL roles.
+
+Если нужно передать IDM полный контроль над PostgreSQL roles/permissions,
+задайте:
+
+```json
+{
+  "rolePolicyMode": "idm-full-control",
+  "permissionPolicyMode": "idm-full-control"
+}
+```
+
+В этом режиме idmMw выполняет синтаксическую проверку идентификаторов и
+permissions, но не ограничивает роли namespace/allowlist. Используйте его
+только если в IDM настроены собственные правила согласования, а DB service
+account ограничен минимально необходимыми правами.
+
+Permissions поддерживают действия `GRANT` и `REVOKE`; SQL Server-style `DENY` в
+PostgreSQL не поддерживается. Scope: `DATABASE`, `SCHEMA::<name>`,
+`TABLE::<schema>.<table>`, `SEQUENCE::<schema>.<sequence>`,
+`FUNCTION::<schema>.<function>`. Для `DATABASE` используется
+`defaultDatabase`, а если он не задан - `current_database()`.
+
+Пример payload для PostgreSQL roles и permissions:
+
+```json
+{
+  "eventId": "idm-postgres-create-001",
+  "operation": "user.create",
+  "targetSystem": "postgres-prod",
+  "payload": {
+    "data": {
+      "login": "ivanov",
+      "password": "REPLACE_WITH_PASSWORD_FROM_IDM",
+      "roles": ["app_writer"],
+      "permissions": [
+        {
+          "action": "GRANT",
+          "permission": "UPDATE",
+          "scope": "TABLE::public.customer"
+        }
+      ]
+    }
+  }
+}
+```
+
+Пример payload для PostgreSQL group role membership:
+
+```json
+{
+  "eventId": "idm-postgres-group-add-001",
+  "operation": "group.addMember",
+  "targetSystem": "postgres-prod",
+  "payload": {
+    "data": {
+      "login": "ivanov",
+      "role": "app_writer"
+    }
+  }
+}
+```
 
 MSSQL logins example:
 

@@ -32,6 +32,8 @@ const TYPE_OPTIONS = [
   'cmdbuild',
   'passwork',
   'consultant-plus',
+  'postgres-role',
+  'mssql-login',
   'rest',
   'db',
   'linux',
@@ -345,6 +347,173 @@ const TYPE_FIELDS: Record<string, ConfigField[]> = {
       name: 'userDeletePayload',
       label: 'Delete: payload template (JSON)',
       inputType: 'json',
+    },
+  ],
+  'postgres-role': [
+    {
+      name: 'connectionString',
+      label: 'Connection string',
+      inputType: 'password',
+      placeholder:
+        'postgresql://idm_admin:REPLACE_WITH_SECRET@postgres.example.local:5432/postgres',
+      help: 'PostgreSQL connection string for role administration.',
+    },
+    {
+      name: 'rolePrefix',
+      label: 'Role prefix',
+      placeholder: 'idm_',
+      help: 'Optional prefix applied to managed user login roles.',
+    },
+    {
+      name: 'managedRolePrefix',
+      label: 'Managed role prefix',
+      placeholder: 'idm_',
+      help: 'Default namespace for manageable PostgreSQL group/grant roles.',
+    },
+    {
+      name: 'rolePolicyMode',
+      label: 'Role policy mode',
+      defaultValue: 'managed-namespace',
+      options: [
+        { value: 'managed-namespace', label: 'managed-namespace' },
+        { value: 'idm-full-control', label: 'idm-full-control' },
+      ],
+      help: 'Default restricts roles to the managed namespace. idm-full-control lets IDM manage all roles allowed by the DB service account.',
+    },
+    {
+      name: 'permissionPolicyMode',
+      label: 'Permission policy mode',
+      defaultValue: 'managed-allowlist',
+      options: [
+        { value: 'managed-allowlist', label: 'managed-allowlist' },
+        { value: 'disabled', label: 'disabled' },
+        { value: 'idm-full-control', label: 'idm-full-control' },
+      ],
+      help: 'Default allows only configured permission allowlist. idm-full-control lets IDM send arbitrary valid GRANT/REVOKE payload permissions.',
+    },
+    {
+      name: 'defaultDatabase',
+      label: 'Default database',
+      placeholder: 'appdb',
+      help: 'Optional database name used for DATABASE permission scope. Defaults to current_database().',
+    },
+    {
+      name: 'defaultLogin',
+      label: 'Default login flag (JSON)',
+      inputType: 'json',
+      placeholder: 'true',
+      help: 'Boolean. false creates user roles with NOLOGIN by default.',
+    },
+    {
+      name: 'defaultRoles',
+      label: 'Default roles (JSON)',
+      inputType: 'json',
+      placeholder: '["app_read"]',
+      help: 'Roles granted to users during user.create.',
+    },
+    {
+      name: 'defaultPermissions',
+      label: 'Default permissions (JSON)',
+      inputType: 'json',
+      placeholder:
+        '[{"action":"GRANT","permission":"SELECT","scope":"SCHEMA::public"}]',
+      help: 'Permissions applied during user.create. Actions: GRANT, REVOKE.',
+    },
+    {
+      name: 'allowedPermissions',
+      label: 'Allowed payload permissions (JSON)',
+      inputType: 'json',
+      placeholder:
+        '[{"action":"GRANT","permission":"UPDATE","scope":"TABLE::public.customer"}]',
+      help: 'Additional permission allowlist for managed-allowlist mode.',
+    },
+    {
+      name: 'physicalDeleteEnabled',
+      label: 'Physical user delete enabled (JSON)',
+      inputType: 'json',
+      placeholder: 'false',
+      help: 'Boolean. true allows DROP ROLE for user.delete.',
+    },
+    {
+      name: 'physicalRoleDeleteEnabled',
+      label: 'Physical group role delete enabled (JSON)',
+      inputType: 'json',
+      placeholder: 'false',
+      help: 'Boolean. true allows DROP ROLE for group.delete.',
+    },
+    {
+      name: 'statementTimeoutMs',
+      label: 'Statement timeout ms',
+      placeholder: '30000',
+    },
+    {
+      name: 'tls',
+      label: 'TLS config (JSON)',
+      inputType: 'json',
+      placeholder:
+        '{"enabled":true,"caPath":"/etc/idmmw/tls/postgres-ca.crt","serverName":"postgres.example.local","rejectUnauthorized":true}',
+    },
+  ],
+  'mssql-login': [
+    {
+      name: 'connectionString',
+      label: 'Connection string',
+      inputType: 'password',
+      placeholder:
+        'Server=mssql.example.local,1433;Database=master;User Id=idm_admin;Password=REPLACE_WITH_SECRET;',
+      help: 'SQL Server connection string for login and database role administration.',
+    },
+    {
+      name: 'loginPrefix',
+      label: 'Login prefix',
+      placeholder: 'idm_',
+      help: 'Optional prefix applied to managed SQL Server logins.',
+    },
+    {
+      name: 'defaultDatabase',
+      label: 'Default database',
+      placeholder: 'appdb',
+      help: 'Database used for database users, roles and permissions.',
+    },
+    {
+      name: 'defaultDatabaseRoles',
+      label: 'Default roles (JSON)',
+      inputType: 'json',
+      placeholder: '["db_datareader"]',
+      help: 'Database roles granted to users during user.create.',
+    },
+    {
+      name: 'defaultPermissions',
+      label: 'Default permissions (JSON)',
+      inputType: 'json',
+      placeholder:
+        '[{"action":"GRANT","permission":"SELECT","scope":"SCHEMA::dbo"}]',
+      help: 'Permissions applied during user.create. Actions: GRANT, DENY, REVOKE.',
+    },
+    {
+      name: 'physicalDeleteEnabled',
+      label: 'Physical user delete enabled (JSON)',
+      inputType: 'json',
+      placeholder: 'false',
+      help: 'Boolean. true allows DROP USER/DROP LOGIN for user.delete.',
+    },
+    {
+      name: 'physicalRoleDeleteEnabled',
+      label: 'Physical role delete enabled (JSON)',
+      inputType: 'json',
+      placeholder: 'false',
+      help: 'Boolean. true allows DROP ROLE for group.delete.',
+    },
+    {
+      name: 'statementTimeoutMs',
+      label: 'Statement timeout ms',
+      placeholder: '30000',
+    },
+    {
+      name: 'tls',
+      label: 'TLS config (JSON)',
+      inputType: 'json',
+      placeholder: '{"encrypt":true,"trustServerCertificate":false}',
     },
   ],
   rest: [{ name: 'baseUrl', label: 'Base URL' }],
@@ -888,6 +1057,17 @@ export function TargetSystemsPage({
     }, 1000);
     return () => window.clearInterval(timer);
   }, [debugSessions.length]);
+
+  useEffect(() => {
+    if (
+      editing ||
+      writableTypes.length === 0 ||
+      writableTypes.includes(form.type)
+    ) {
+      return;
+    }
+    setForm(newForm(defaultWritableType));
+  }, [defaultWritableType, editing, form.type, writableTypes]);
 
   useEffect(() => {
     if (!logsTarget) return;

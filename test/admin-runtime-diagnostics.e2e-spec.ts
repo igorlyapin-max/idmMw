@@ -81,7 +81,7 @@ describe('Admin runtime diagnostics auth (e2e)', () => {
         password: 'admin-runtime-password',
       })
       .expect(201);
-    const cookies = login.headers['set-cookie'] as string[];
+    const cookies = login.headers['set-cookie'] as unknown as string[];
     const csrfToken = (login.body as LoginResponseBody).csrfToken;
 
     resetRuntimeLogBufferForTests();

@@ -50,7 +50,7 @@
     "security:check-aspm": "node scripts/check-aspm-findings.mjs ../aspm/3.json",
     "security:check-aspm:test": "node scripts/check-aspm-findings.test.mjs",
     "security:rotate-key": "ts-node -r tsconfig-paths/register src/security/rotate-encryption-key.cli.ts",
-    "validate": "tsc --noEmit && npm run db:validate && npm run lint"
+    "validate": "tsc --noEmit && npm run db:validate && npm run db:validate:cockroach && npm run lint"
   },
   "dependencies": {
     "@nestjs/axios": "^4.0.1",

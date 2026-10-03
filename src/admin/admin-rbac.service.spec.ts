@@ -39,7 +39,9 @@ describe('AdminRbacService', () => {
     const effective = await service.effectivePermissions(session('local'));
 
     expect(effective.superadmin).toBe(true);
-    await expect(service.assertWrite(session('local'), 'linux')).resolves.toBeUndefined();
+    await expect(
+      service.assertWrite(session('local'), 'linux'),
+    ).resolves.toBeUndefined();
   });
 
   it('maps SSO groups to connector read/write permissions', async () => {
@@ -65,7 +67,7 @@ describe('AdminRbacService', () => {
       },
     ]);
 
-    const sso = session('sso', ['idmmw-linux-ops']);
+    const sso = session('oidc', ['idmmw-linux-ops']);
     await expect(service.assertRead(sso, 'linux')).resolves.toBeUndefined();
     await expect(service.assertWrite(sso, 'linux')).rejects.toThrow(
       ForbiddenException,
@@ -74,7 +76,7 @@ describe('AdminRbacService', () => {
   });
 
   it('fails closed for SSO users without mapped groups', async () => {
-    await expect(service.assertRead(session('sso'), 'linux')).rejects.toThrow(
+    await expect(service.assertRead(session('oidc'), 'linux')).rejects.toThrow(
       ForbiddenException,
     );
   });
