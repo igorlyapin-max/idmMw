@@ -87,6 +87,7 @@ describe('AuthService', () => {
     const service = new AuthService(
       config({
         ADMIN_AUTH_MODE: 'sso',
+        ADMIN_AUTH_SSO_PROVIDERS: 'header',
         ADMIN_AUTH_LOCAL_USERNAME: undefined,
         ADMIN_AUTH_LOCAL_PASSWORD: undefined,
         ADMIN_AUTH_ALLOWED_GROUPS: 'idmmw-admins',
@@ -105,7 +106,59 @@ describe('AuthService', () => {
 
     expect(login.authenticated).toBe(true);
     expect(login.user).toEqual(
-      expect.objectContaining({ name: 'alice', provider: 'sso' }),
+      expect.objectContaining({
+        name: 'alice',
+        provider: 'header-sso',
+        groups: ['users', 'idmmw-admins'],
+      }),
     );
+  });
+
+  it('does not accept header SSO when the header provider is disabled', () => {
+    const service = new AuthService(
+      config({
+        ADMIN_AUTH_MODE: 'sso',
+        ADMIN_AUTH_SSO_PROVIDERS: 'oidc,saml',
+        ADMIN_AUTH_LOCAL_USERNAME: undefined,
+        ADMIN_AUTH_LOCAL_PASSWORD: undefined,
+        ADMIN_AUTH_ALLOWED_GROUPS: 'idmmw-admins',
+        ADMIN_AUTH_TRUSTED_PROXY_CIDRS: '127.0.0.1/32',
+      }),
+    );
+
+    expect(() =>
+      service.loginSso(
+        request({
+          'x-authenticated-user': 'alice',
+          'x-authenticated-groups': 'idmmw-admins',
+        }),
+        response(),
+      ),
+    ).toThrow('Header SSO admin login is disabled');
+  });
+
+  it('creates direct OIDC and SAML sessions through the shared SSO policy', () => {
+    const service = new AuthService(
+      config({
+        ADMIN_AUTH_MODE: 'sso',
+        ADMIN_AUTH_SSO_PROVIDERS: 'oidc,saml',
+        ADMIN_AUTH_LOCAL_USERNAME: undefined,
+        ADMIN_AUTH_LOCAL_PASSWORD: undefined,
+        ADMIN_AUTH_ALLOWED_GROUPS: 'idmmw-admins',
+      }),
+    );
+    const oidc = service.loginExternal(
+      { user: 'alice', groups: ['idmmw-admins'] },
+      'oidc',
+      response(),
+    );
+    const saml = service.loginExternal(
+      { user: 'bob', groups: ['idmmw-admins'] },
+      'saml',
+      response(),
+    );
+
+    expect(oidc.user?.provider).toBe('oidc');
+    expect(saml.user?.provider).toBe('saml');
   });
 });

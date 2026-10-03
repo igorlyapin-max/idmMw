@@ -31,10 +31,25 @@ export class TargetSystemService {
     enabled?: boolean;
     limit?: number;
     offset?: number;
+    allowedTypes?: string[];
   }) {
+    if (params.allowedTypes && params.allowedTypes.length === 0) {
+      return [];
+    }
+    if (
+      params.type &&
+      params.allowedTypes &&
+      !params.allowedTypes.includes(params.type)
+    ) {
+      return [];
+    }
     const items = await this.prisma.targetSystem.findMany({
       where: {
-        ...(params.type ? { type: params.type } : {}),
+        ...(params.type
+          ? { type: params.type }
+          : params.allowedTypes
+            ? { type: { in: params.allowedTypes } }
+            : {}),
         ...(params.enabled !== undefined ? { enabled: params.enabled } : {}),
       },
       take: params.limit ?? 50,

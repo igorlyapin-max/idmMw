@@ -127,6 +127,7 @@ export const appConfigSchema = z
       .transform((v) => v === 'true')
       .default(false),
     ADMIN_AUTH_MODE: z.enum(['local', 'sso', 'both']).default('local'),
+    ADMIN_AUTH_SSO_PROVIDERS: z.string().default('header'),
     ADMIN_AUTH_LOCAL_USERNAME: z.string().optional(),
     ADMIN_AUTH_LOCAL_PASSWORD: z.string().optional(),
     ADMIN_AUTH_SESSION_SECRET: z.string().optional(),
@@ -145,6 +146,22 @@ export const appConfigSchema = z
     ADMIN_AUTH_SSO_GROUPS_HEADER: z.string().default('x-authenticated-groups'),
     ADMIN_AUTH_SSO_GROUPS_DELIMITER: z.string().default(','),
     ADMIN_AUTH_TRUSTED_PROXY_CIDRS: z.string().optional(),
+    ADMIN_AUTH_OIDC_ISSUER_URL: z.string().optional(),
+    ADMIN_AUTH_OIDC_CLIENT_ID: z.string().optional(),
+    ADMIN_AUTH_OIDC_CLIENT_SECRET: z.string().optional(),
+    ADMIN_AUTH_OIDC_REDIRECT_URI: z.string().optional(),
+    ADMIN_AUTH_OIDC_SCOPES: z.string().default('openid profile email'),
+    ADMIN_AUTH_OIDC_USER_CLAIM: z.string().default('sub'),
+    ADMIN_AUTH_OIDC_GROUPS_CLAIM: z.string().default('groups'),
+    ADMIN_AUTH_SAML_ENTRYPOINT: z.string().optional(),
+    ADMIN_AUTH_SAML_ISSUER: z.string().optional(),
+    ADMIN_AUTH_SAML_CALLBACK_URL: z.string().optional(),
+    ADMIN_AUTH_SAML_IDP_ISSUER: z.string().optional(),
+    ADMIN_AUTH_SAML_IDP_CERT: z.string().optional(),
+    ADMIN_AUTH_SAML_SP_CERT: z.string().optional(),
+    ADMIN_AUTH_SAML_SP_PRIVATE_KEY: z.string().optional(),
+    ADMIN_AUTH_SAML_USER_ATTRIBUTE: z.string().default('nameID'),
+    ADMIN_AUTH_SAML_GROUPS_ATTRIBUTE: z.string().default('groups'),
     HTTP_TLS_ENABLED: z
       .string()
       .transform((v) => v === 'true')
@@ -289,16 +306,64 @@ export const appConfigSchema = z
             'SSO admin auth requires ADMIN_AUTH_ALLOWLIST or ADMIN_AUTH_ALLOWED_GROUPS',
         });
       }
+      const ssoProviders = String(config.ADMIN_AUTH_SSO_PROVIDERS ?? 'header')
+        .split(',')
+        .map((value) => value.trim())
+        .filter(Boolean);
+      const invalidSsoProvider = ssoProviders.find(
+        (provider) => !['header', 'oidc', 'saml'].includes(provider),
+      );
+      if (invalidSsoProvider) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['ADMIN_AUTH_SSO_PROVIDERS'],
+          message: 'ADMIN_AUTH_SSO_PROVIDERS supports only header, oidc, saml',
+        });
+      }
       if (
         (config.ADMIN_AUTH_MODE === 'sso' ||
           config.ADMIN_AUTH_MODE === 'both') &&
+        ssoProviders.includes('header') &&
         !config.ADMIN_AUTH_TRUSTED_PROXY_CIDRS
       ) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ['ADMIN_AUTH_TRUSTED_PROXY_CIDRS'],
           message:
-            'SSO admin auth requires ADMIN_AUTH_TRUSTED_PROXY_CIDRS to prevent spoofed SSO headers',
+            'Header SSO admin auth requires ADMIN_AUTH_TRUSTED_PROXY_CIDRS to prevent spoofed SSO headers',
+        });
+      }
+      if (
+        (config.ADMIN_AUTH_MODE === 'sso' ||
+          config.ADMIN_AUTH_MODE === 'both') &&
+        ssoProviders.includes('oidc') &&
+        (!config.ADMIN_AUTH_OIDC_ISSUER_URL ||
+          !config.ADMIN_AUTH_OIDC_CLIENT_ID ||
+          !config.ADMIN_AUTH_OIDC_CLIENT_SECRET ||
+          !config.ADMIN_AUTH_OIDC_REDIRECT_URI)
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['ADMIN_AUTH_OIDC_ISSUER_URL'],
+          message:
+            'OIDC admin auth requires issuer URL, client ID, client secret and redirect URI',
+        });
+      }
+      if (
+        (config.ADMIN_AUTH_MODE === 'sso' ||
+          config.ADMIN_AUTH_MODE === 'both') &&
+        ssoProviders.includes('saml') &&
+        (!config.ADMIN_AUTH_SAML_ENTRYPOINT ||
+          !config.ADMIN_AUTH_SAML_ISSUER ||
+          !config.ADMIN_AUTH_SAML_CALLBACK_URL ||
+          !config.ADMIN_AUTH_SAML_IDP_ISSUER ||
+          !config.ADMIN_AUTH_SAML_IDP_CERT)
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['ADMIN_AUTH_SAML_ENTRYPOINT'],
+          message:
+            'SAML admin auth requires entrypoint, SP issuer, callback URL, IdP issuer and IdP certificate',
         });
       }
     }

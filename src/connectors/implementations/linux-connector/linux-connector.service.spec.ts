@@ -1,7 +1,10 @@
 import { EventEmitter } from 'events';
 import { of } from 'rxjs';
 import { HttpService } from '@nestjs/axios';
+import { ConfigService } from '@nestjs/config';
 import { Client } from 'ssh2';
+import { PrismaService } from '../../../database/prisma.service';
+import { IndeedPamAapmClient } from '../../../secrets/indeed-pam-aapm.client';
 import { LinuxConnectorService } from './linux-connector.service';
 
 const sshCommands: string[] = [];
@@ -46,13 +49,32 @@ jest.mock('ssh2', () => ({
 describe('LinuxConnectorService', () => {
   let request: jest.Mock;
   let service: LinuxConnectorService;
+  let prisma: {
+    targetSystem: { findUnique: jest.Mock };
+    linuxHost: { count: jest.Mock };
+    linuxServerGroup: { findMany: jest.Mock; findFirst: jest.Mock };
+  };
+  let configService: { get: jest.Mock };
+  let pamClient: { getValue: jest.Mock };
 
   beforeEach(() => {
     sshCommands.length = 0;
     request = jest
       .fn()
       .mockReturnValue(of({ data: { ok: true }, status: 200 }));
-    service = new LinuxConnectorService({ request } as unknown as HttpService);
+    prisma = {
+      targetSystem: { findUnique: jest.fn() },
+      linuxHost: { count: jest.fn() },
+      linuxServerGroup: { findMany: jest.fn(), findFirst: jest.fn() },
+    };
+    configService = { get: jest.fn((key: string) => process.env[key]) };
+    pamClient = { getValue: jest.fn() };
+    service = new LinuxConnectorService(
+      { request } as unknown as HttpService,
+      prisma as unknown as PrismaService,
+      configService as unknown as ConfigService,
+      pamClient as unknown as IndeedPamAapmClient,
+    );
     (Client as unknown as jest.Mock).mockClear();
   });
 
@@ -227,5 +249,100 @@ describe('LinuxConnectorService', () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toContain('sudoMode=passwordless');
+  });
+
+  it('returns Linux fleet server groups as IDM groups', async () => {
+    prisma.targetSystem.findUnique.mockResolvedValue({
+      id: 'ts-linux',
+      type: 'linux',
+    });
+    prisma.linuxServerGroup.findMany.mockResolvedValue([
+      {
+        code: 'linux-app',
+        name: 'Linux App Servers',
+        description: 'application nodes',
+        enabled: true,
+        hosts: [{ hostId: 'host-1' }, { hostId: 'host-2' }],
+      },
+    ]);
+
+    const result = await service.execute({
+      operation: 'group.search',
+      targetSystem: 'linux-prod',
+      payload: {
+        config: { provider: 'ssh-sudo-fleet' },
+        data: {},
+      },
+    });
+
+    expect(result).toEqual({
+      success: true,
+      data: {
+        data: [
+          expect.objectContaining({
+            _id: 'linux-app',
+            code: 'linux-app',
+            hostCount: 2,
+          }),
+        ],
+        meta: { total: 1 },
+      },
+    });
+  });
+
+  it('fans out Linux fleet user operations to selected server group hosts', async () => {
+    process.env.LINUX_TEST_KEY = 'key';
+    prisma.targetSystem.findUnique.mockResolvedValue({
+      id: 'ts-linux',
+      type: 'linux',
+    });
+    prisma.linuxServerGroup.findMany.mockResolvedValue([
+      {
+        code: 'linux-app',
+        hosts: [
+          {
+            host: {
+              id: 'host-1',
+              name: 'app-1',
+              host: 'app-1.local',
+              port: 22,
+              hostFingerprint: 'SHA256:test-fingerprint',
+              enabled: true,
+              credentialProfile: {
+                username: 'idm',
+                mode: 'env',
+                privateKeyRef: 'env:LINUX_TEST_KEY',
+                passwordRef: null,
+                enabled: true,
+              },
+            },
+          },
+        ],
+      },
+    ]);
+
+    const result = await service.execute({
+      operation: 'user.create',
+      targetSystem: 'linux-prod',
+      payload: {
+        config: {
+          provider: 'ssh-sudo-fleet',
+          sudoMode: 'passwordless',
+        },
+        data: {
+          login: 'ivanov',
+          password: 'secret-password',
+          serverGroups: ['linux-app'],
+          posixGroups: ['ops'],
+        },
+      },
+    });
+
+    expect(configService.get).toHaveBeenCalledWith('LINUX_TEST_KEY');
+    expect(result.success).toBe(true);
+    expect(sshCommands).toEqual([
+      "sudo useradd -m -d '/home/ivanov' -s '/bin/bash' -G 'ops' 'ivanov'",
+      'sudo chpasswd',
+    ]);
   });
 });

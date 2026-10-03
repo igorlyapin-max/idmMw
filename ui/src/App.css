@@ -233,6 +233,16 @@ input[type='checkbox'] {
   background: var(--color-row-hover);
 }
 
+.compact-table {
+  margin-top: 12px;
+  font-size: 13px;
+}
+
+.compact-table th,
+.compact-table td {
+  padding: 6px 8px;
+}
+
 .actions {
   display: flex;
   gap: 4px;
@@ -359,6 +369,47 @@ input[type='checkbox'] {
   display: grid;
   gap: 12px;
   margin-top: 12px;
+}
+
+.linux-fleet-panel {
+  display: grid;
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.fleet-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(280px, 1fr));
+  gap: 16px;
+}
+
+.fleet-column,
+.fleet-groups {
+  min-width: 0;
+}
+
+.fleet-group-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.fleet-group-row {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(280px, 2fr) auto;
+  gap: 12px;
+  align-items: start;
+  padding: 10px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+
+.fleet-host-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  max-height: 120px;
+  overflow: auto;
 }
 
 .fieldset {
@@ -644,6 +695,15 @@ input[type='checkbox'] {
 
   .extra-config-row {
     grid-template-columns: 1fr;
+  }
+
+  .fleet-grid,
+  .fleet-group-row {
+    grid-template-columns: 1fr;
+  }
+
+  .fleet-host-checks {
+    max-height: none;
   }
 
   .data-table {

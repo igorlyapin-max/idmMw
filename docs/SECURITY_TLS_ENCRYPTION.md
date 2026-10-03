@@ -37,12 +37,70 @@ ADMIN_AUTH_SESSION_SECRET=aapm://idmmw-admin-session-credential
 ADMIN_AUTH_COOKIE_SECURE=true
 ```
 
+Режимы Admin UI authentication:
+
+- `ADMIN_AUTH_MODE=local`: вход только локальным admin account из env/secret.
+  Это обязательный break-glass вариант для первичной настройки RBAC и
+  восстановления доступа.
+- `ADMIN_AUTH_MODE=sso`: вход только через включенные SSO providers.
+  Providers перечисляются в `ADMIN_AUTH_SSO_PROVIDERS`: `header`, `oidc`,
+  `saml`.
+- `ADMIN_AUTH_MODE=both`: рекомендуемый production режим. SSO используется для
+  операторов, local admin сохраняется как break-glass superadmin.
+
 При `HTTP_TLS_ENABLED=true` или `NODE_ENV=production` admin session cookie
 становится `Secure` по умолчанию. Для SSO используйте доверенный reverse proxy,
 который передает `ADMIN_AUTH_SSO_USER_HEADER` и
 `ADMIN_AUTH_SSO_GROUPS_HEADER`; доступ ограничивайте через
-`ADMIN_AUTH_ALLOWLIST` или `ADMIN_AUTH_ALLOWED_GROUPS`. SSO modes также требуют
-`ADMIN_AUTH_TRUSTED_PROXY_CIDRS`, иначе spoofable SSO headers отклоняются.
+`ADMIN_AUTH_ALLOWLIST` или `ADMIN_AUTH_ALLOWED_GROUPS`.
+`ADMIN_AUTH_TRUSTED_PROXY_CIDRS` обязателен только для provider `header`, иначе
+spoofable SSO headers отклоняются.
+`ADMIN_AUTH_ALLOWED_GROUPS` является только allowlist для входа в Admin UI и не
+выдает прав на connector types. Права назначаются отдельно в Admin UI `RBAC`:
+IdP group мапится на локальную роль, а роль содержит `read`/`write` permissions
+по connector type.
+
+Для прямой OIDC-интеграции idmMw сам выполняет Authorization Code + PKCE flow:
+
+```env
+ADMIN_AUTH_MODE=both
+ADMIN_AUTH_SSO_PROVIDERS=oidc
+ADMIN_AUTH_OIDC_ISSUER_URL=https://fam.example.ru
+ADMIN_AUTH_OIDC_CLIENT_ID=idmmw
+ADMIN_AUTH_OIDC_CLIENT_SECRET=aapm://idmmw-oidc-client-secret
+ADMIN_AUTH_OIDC_REDIRECT_URI=https://idmmw.example.ru/auth/oidc/callback
+ADMIN_AUTH_OIDC_SCOPES=openid profile email
+ADMIN_AUTH_OIDC_USER_CLAIM=sub
+ADMIN_AUTH_OIDC_GROUPS_CLAIM=groups
+ADMIN_AUTH_ALLOWED_GROUPS=idmmw-admins,idmmw-operators
+```
+
+Для прямой SAML-интеграции idmMw выступает SP:
+
+```env
+ADMIN_AUTH_MODE=both
+ADMIN_AUTH_SSO_PROVIDERS=saml
+ADMIN_AUTH_SAML_ENTRYPOINT=https://fam.example.ru/saml/login
+ADMIN_AUTH_SAML_ISSUER=https://idmmw.example.ru/saml/metadata
+ADMIN_AUTH_SAML_CALLBACK_URL=https://idmmw.example.ru/auth/saml/acs
+ADMIN_AUTH_SAML_IDP_ISSUER=https://fam.example.ru/saml
+ADMIN_AUTH_SAML_IDP_CERT=aapm://fam-saml-idp-cert
+ADMIN_AUTH_SAML_SP_CERT=aapm://idmmw-saml-sp-cert
+ADMIN_AUTH_SAML_SP_PRIVATE_KEY=aapm://idmmw-saml-sp-private-key
+ADMIN_AUTH_SAML_USER_ATTRIBUTE=nameID
+ADMIN_AUTH_SAML_GROUPS_ATTRIBUTE=groups
+ADMIN_AUTH_ALLOWED_GROUPS=idmmw-admins,idmmw-operators
+```
+
+SAML metadata idmMw публикует на `/auth/saml/metadata`. В Avanpost FAM idmMw
+настраивается как application: OpenID Connect application или SAML application.
+Не настраивайте idmMw как FAM external IdP source: FAM в этом сценарии является
+IdP, idmMw является OIDC client/SAML SP.
+SAML ACS принимает только SP-initiated ответы с обязательным валидным
+`InResponseTo`; IdP-initiated SSO не поддерживается.
+`ADMIN_AUTH_SAML_IDP_ISSUER` проверяется как issuer IdP.
+Provider contract для Admin UI: `local`, `header-sso`, `oidc`, `saml`,
+`disabled`; legacy `sso` не поддерживается.
 Admin auth защищает `/admin/*`; IDM inbound API и `/idm/*` защищаются отдельным
 HMAC runtime contract при `INTEGRATION_AUTH_ENABLED=true`. `/health` остаётся
 публичным liveness, `/ready` и `/metrics` публикуются по внутреннему runtime

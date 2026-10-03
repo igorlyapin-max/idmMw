@@ -8,7 +8,8 @@ import { safeEqualFixedLength } from '../security/constant-time';
 export interface AdminUserSession {
   sub: string;
   name: string;
-  provider: 'local' | 'sso' | 'disabled';
+  provider: AdminAuthProvider;
+  groups?: string[];
   csrfToken: string;
   expiresAt: number;
 }
@@ -19,14 +20,22 @@ export interface SessionStatus {
   user?: Omit<AdminUserSession, 'csrfToken' | 'expiresAt'>;
   csrfToken?: string;
   mode: string;
+  ssoProviders?: AdminSsoProvider[];
 }
 
-interface SsoIdentity {
+export interface ExternalAdminIdentity {
   user: string;
   groups: string[];
 }
 
 const DEFAULT_COOKIE_NAME = 'idmmw_admin_session';
+export type AdminAuthProvider =
+  | 'local'
+  | 'header-sso'
+  | 'oidc'
+  | 'saml'
+  | 'disabled';
+export type AdminSsoProvider = 'header' | 'oidc' | 'saml';
 
 @Injectable()
 export class AuthService {
@@ -39,6 +48,21 @@ export class AuthService {
   mode(): 'local' | 'sso' | 'both' {
     const mode = this.config.get<string>('ADMIN_AUTH_MODE') ?? 'local';
     return mode === 'sso' || mode === 'both' ? mode : 'local';
+  }
+
+  ssoProviders(): AdminSsoProvider[] {
+    if (this.mode() === 'local') {
+      return [];
+    }
+    const providers = this.csv('ADMIN_AUTH_SSO_PROVIDERS');
+    const effective = providers.length > 0 ? providers : ['header'];
+    return effective.filter((provider): provider is AdminSsoProvider =>
+      ['header', 'oidc', 'saml'].includes(provider),
+    );
+  }
+
+  isSsoProviderEnabled(provider: AdminSsoProvider): boolean {
+    return this.ssoProviders().includes(provider);
   }
 
   cookieName(): string {
@@ -57,6 +81,7 @@ export class AuthService {
           sub: 'auth-disabled',
           name: 'Auth disabled',
           provider: 'disabled',
+          groups: [],
         },
       };
     }
@@ -67,6 +92,7 @@ export class AuthService {
         authEnabled: true,
         authenticated: false,
         mode: this.mode(),
+        ssoProviders: this.ssoProviders(),
       };
     }
 
@@ -74,11 +100,13 @@ export class AuthService {
       authEnabled: true,
       authenticated: true,
       mode: this.mode(),
+      ssoProviders: this.ssoProviders(),
       csrfToken: session.csrfToken,
       user: {
         sub: session.sub,
         name: session.name,
         provider: session.provider,
+        groups: session.groups ?? [],
       },
     };
   }
@@ -104,7 +132,7 @@ export class AuthService {
       throw new UnauthorizedException('Invalid admin credentials');
     }
 
-    const session = this.createSession(username, username, 'local');
+    const session = this.createSession(username, username, 'local', []);
     this.writeSessionCookie(res, session);
     return this.sessionStatusFromSession(session);
   }
@@ -116,6 +144,9 @@ export class AuthService {
     if (this.mode() === 'local') {
       throw new UnauthorizedException('SSO admin login is disabled');
     }
+    if (!this.isSsoProviderEnabled('header')) {
+      throw new UnauthorizedException('Header SSO admin login is disabled');
+    }
     if (!this.isTrustedSsoSource(req)) {
       throw new UnauthorizedException('SSO headers require a trusted proxy');
     }
@@ -125,7 +156,36 @@ export class AuthService {
       throw new UnauthorizedException('SSO user is not allowed for Admin UI');
     }
 
-    const session = this.createSession(identity.user, identity.user, 'sso');
+    const session = this.createSession(
+      identity.user,
+      identity.user,
+      'header-sso',
+      identity.groups,
+    );
+    this.writeSessionCookie(res, session);
+    return this.sessionStatusFromSession(session);
+  }
+
+  loginExternal(
+    identity: ExternalAdminIdentity,
+    provider: Exclude<AdminAuthProvider, 'local' | 'header-sso' | 'disabled'>,
+    res: Response,
+  ): SessionStatus {
+    if (!this.isEnabled()) {
+      return this.issueDisabledStatus();
+    }
+    if (this.mode() === 'local') {
+      throw new UnauthorizedException('SSO admin login is disabled');
+    }
+    if (!this.isSsoAllowed(identity)) {
+      throw new UnauthorizedException('SSO user is not allowed for Admin UI');
+    }
+    const session = this.createSession(
+      identity.user,
+      identity.user,
+      provider,
+      identity.groups,
+    );
     this.writeSessionCookie(res, session);
     return this.sessionStatusFromSession(session);
   }
@@ -140,6 +200,7 @@ export class AuthService {
         sub: 'auth-disabled',
         name: 'Auth disabled',
         provider: 'disabled',
+        groups: [],
         csrfToken: 'auth-disabled',
         expiresAt: Date.now() + 60_000,
       };
@@ -150,7 +211,7 @@ export class AuthService {
       return session;
     }
 
-    if (this.mode() !== 'local' && res) {
+    if (this.mode() !== 'local' && res && this.isSsoProviderEnabled('header')) {
       const identity = this.isTrustedSsoSource(req)
         ? this.extractSsoIdentity(req)
         : null;
@@ -158,7 +219,8 @@ export class AuthService {
         const ssoSession = this.createSession(
           identity.user,
           identity.user,
-          'sso',
+          'header-sso',
+          identity.groups,
         );
         this.writeSessionCookie(res, ssoSession);
         return ssoSession;
@@ -179,12 +241,14 @@ export class AuthService {
   private createSession(
     sub: string,
     name: string,
-    provider: 'local' | 'sso',
+    provider: Exclude<AdminAuthProvider, 'disabled'>,
+    groups: string[],
   ): AdminUserSession {
     return {
       sub,
       name,
       provider,
+      groups,
       csrfToken: randomBytes(24).toString('base64url'),
       expiresAt: Date.now() + this.ttlSeconds() * 1000,
     };
@@ -275,7 +339,7 @@ export class AuthService {
     );
   }
 
-  private extractSsoIdentity(req: Request): SsoIdentity | null {
+  private extractSsoIdentity(req: Request): ExternalAdminIdentity | null {
     const userHeader =
       this.config.get<string>('ADMIN_AUTH_SSO_USER_HEADER') ??
       'x-authenticated-user';
@@ -306,7 +370,7 @@ export class AuthService {
     );
   }
 
-  private isSsoAllowed(identity: SsoIdentity): boolean {
+  private isSsoAllowed(identity: ExternalAdminIdentity): boolean {
     const allowlist = this.csv('ADMIN_AUTH_ALLOWLIST');
     const allowedGroups = this.csv('ADMIN_AUTH_ALLOWED_GROUPS');
     return (
@@ -352,11 +416,13 @@ export class AuthService {
       authEnabled: true,
       authenticated: true,
       mode: this.mode(),
+      ssoProviders: this.ssoProviders(),
       csrfToken: session.csrfToken,
       user: {
         sub: session.sub,
         name: session.name,
         provider: session.provider,
+        groups: session.groups ?? [],
       },
     };
   }
@@ -370,6 +436,7 @@ export class AuthService {
         sub: 'auth-disabled',
         name: 'Auth disabled',
         provider: 'disabled',
+        groups: [],
       },
     };
   }

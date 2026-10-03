@@ -296,6 +296,67 @@ curl -X POST http://localhost:3010/admin/target-systems \
   }'
 ```
 
+Linux fleet via SSH sudo example:
+
+```bash
+curl -X POST http://localhost:3010/admin/target-systems \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "linux-prod-fleet",
+    "type": "linux",
+    "label": "Linux prod fleet",
+    "config": {
+      "provider": "ssh-sudo-fleet",
+      "diagnosticTargetSystem": "linux-prod-fleet",
+      "sudoMode": "passwordless",
+      "defaultShell": "/bin/bash",
+      "defaultHomeBase": "/home",
+      "defaultGroups": ["users"],
+      "physicalDeleteEnabled": false,
+      "timeoutMs": 30000
+    },
+    "enabled": true
+  }'
+```
+
+После создания `linux` target system с `provider=ssh-sudo-fleet` настройте
+инвентарь в Admin UI `Target Systems -> Fleet` или через API
+`/admin/linux-fleet`:
+
+1. `Credential profile`: `name`, `mode=env|aapm`, `username`,
+   `privateKeyRef` и/или `passwordRef`.
+2. `Host`: `name`, `host`, `port`, pinned `hostFingerprint`,
+   `credentialProfileId`.
+3. `Server group`: `code`, `name`, затем назначьте hosts в группу.
+
+Avanpost IDM видит `Server group` как один объект группы/права. В webhook
+передавайте logical server groups в `payload.data.serverGroups`; POSIX группы
+Linux передавайте отдельно в `payload.data.posixGroups`.
+
+```json
+{
+  "eventId": "avanpost-linux-create-001",
+  "operation": "user.create",
+  "targetSystem": "linux-prod-fleet",
+  "payload": {
+    "data": {
+      "login": "ivanov",
+      "password": "REPLACE_WITH_PASSWORD_FROM_IDM",
+      "serverGroups": ["linux-app"],
+      "posixGroups": ["users", "app"]
+    }
+  }
+}
+```
+
+Для `mode=env` ref указывается как `env:LINUX_SSH_KEY` или имя переменной
+`LINUX_SSH_KEY`; значение хранится только в окружении idmMw. Для `mode=aapm`
+ref указывается как `aapm://<secret-id>` или `secret://<secret-id>` и
+разрешается через configured IndeedPAM/AAPM client. В production используйте
+`ENCRYPTION_ENABLED=true`, чтобы `TargetSystem.config` и inventory metadata
+хранились зашифрованно at rest; сами секретные значения в таблицах inventory
+не хранятся, только references.
+
 `linux` принимает пароль из IDM для `user.create` и `user.changePassword`.
 `provider=ssh-sudo` выполняет только allowlisted lifecycle-команды через SSH,
 требует `sudoMode=passwordless` и pinned `hostFingerprint`. Пароли для
@@ -306,7 +367,10 @@ line. `provider=remote-agent` вызывает HTTP agent endpoints `/health`,
 `/users/{login}/enable`. При `apiToken` remote-agent требует `https://` и
 `allowedHosts`; redirects с bearer token отключаются. `user.delete` по
 умолчанию блокирует и истекает УЗ; `userdel` выполняется только при
-`physicalDeleteEnabled=true`.
+`physicalDeleteEnabled=true`. `provider=ssh-sudo-fleet` использует тот же SSH
+allowlist, но fan-out выполняется по hosts, назначенным в `serverGroups` на
+стороне idmMw; `group.search`, `sync.full` и `sync.incremental` возвращают
+logical server groups для синхронизации справочника Avanpost IDM.
 
 ConsultantPlus example:
 
@@ -605,6 +669,123 @@ npm run test:passwork-live
 Если `ADMIN_AUTH_ENABLED=true`, все `/admin/*` endpoints требуют admin session.
 State-changing запросы (`POST`, `PATCH`, `DELETE`) должны передавать
 `X-CSRF-Token` из `/auth/session` или ответа login.
+
+### Admin UI RBAC и IdP group mapping
+
+Admin authentication и RBAC разделены:
+
+- `ADMIN_AUTH_MODE=local` включает только локального администратора.
+- `ADMIN_AUTH_MODE=sso` включает только вход через SSO providers из
+  `ADMIN_AUTH_SSO_PROVIDERS`.
+- `ADMIN_AUTH_MODE=both` рекомендуется для production: SSO для операторов,
+  local admin как break-glass superadmin.
+- `ADMIN_AUTH_SSO_PROVIDERS=header,oidc,saml` включает нужные варианты входа.
+  `header` сохраняет reverse proxy/IdP headers, `oidc` и `saml` выполняются
+  напрямую в idmMw.
+
+Local admin всегда имеет superadmin-права в idmMw и нужен для первичной
+настройки RBAC, исправления ошибочного mapping и восстановления доступа.
+Не удаляйте local admin из production-контура; храните
+`ADMIN_AUTH_LOCAL_PASSWORD` и `ADMIN_AUTH_SESSION_SECRET` в env secret или AAPM.
+
+`ADMIN_AUTH_ALLOWED_GROUPS` и `ADMIN_AUTH_ALLOWLIST` только разрешают вход в
+Admin UI. Они не выдают прав на connector types. Права назначаются в Admin UI:
+
+1. Войти local admin.
+2. Открыть `RBAC`.
+3. Создать роль, например `linux-operators`.
+4. Выбрать `Connector type = linux`.
+5. Включить `Read` и при необходимости `Write`.
+6. Добавить mapping `IdP group -> Role`, например
+   `idmmw-linux-operators -> linux-operators`.
+7. Войти через SSO пользователем из этой IdP group.
+8. Проверить блок `Effective permissions` и доступ к `Target systems`, `Logs`,
+   `Debug`, `DLQ` и connector-specific inventory.
+
+Семантика прав:
+
+- `read`: просмотр target systems этого типа, просмотр logs/debug status,
+  enable/disable temporary debug, просмотр DLQ, retry/skip DLQ,
+  connector-specific readonly inventory.
+- `write`: создание, изменение, удаление и test target systems этого типа,
+  изменение connector-specific inventory.
+
+Примеры mappings:
+
+| IdP group               | Local role        | Connector permissions  |
+| ----------------------- | ----------------- | ---------------------- |
+| `idmmw-zabbix-readers`  | `zabbix-readers`  | `zabbix: read`         |
+| `idmmw-linux-operators` | `linux-operators` | `linux: read`          |
+| `idmmw-linux-admins`    | `linux-admins`    | `linux: read/write`    |
+| `idmmw-cmdbuild-admins` | `cmdbuild-admins` | `cmdbuild: read/write` |
+
+### Прямой OIDC/SAML вход в Admin UI
+
+Для прямого SSO idmMw является приложением, а Avanpost FAM или другой IdP
+выполняет аутентификацию пользователя. В FAM используйте раздел приложений:
+OpenID Connect application или SAML application. Не используйте раздел external
+IdP/user source: он нужен для подключения внешнего IdP к FAM, а не для
+подключения idmMw к FAM.
+
+OIDC example:
+
+```env
+ADMIN_AUTH_ENABLED=true
+ADMIN_AUTH_MODE=both
+ADMIN_AUTH_SSO_PROVIDERS=oidc
+ADMIN_AUTH_SESSION_SECRET=aapm://idmmw-admin-session-credential
+ADMIN_AUTH_LOCAL_USERNAME=admin
+ADMIN_AUTH_LOCAL_PASSWORD=aapm://idmmw-admin-local-credential
+ADMIN_AUTH_ALLOWED_GROUPS=idmmw-admins,idmmw-linux-operators
+
+ADMIN_AUTH_OIDC_ISSUER_URL=https://fam.example.ru
+ADMIN_AUTH_OIDC_CLIENT_ID=idmmw
+ADMIN_AUTH_OIDC_CLIENT_SECRET=aapm://idmmw-oidc-client-secret
+ADMIN_AUTH_OIDC_REDIRECT_URI=https://idmmw.example.ru/auth/oidc/callback
+ADMIN_AUTH_OIDC_SCOPES=openid profile email
+ADMIN_AUTH_OIDC_USER_CLAIM=sub
+ADMIN_AUTH_OIDC_GROUPS_CLAIM=groups
+```
+
+SAML example:
+
+```env
+ADMIN_AUTH_ENABLED=true
+ADMIN_AUTH_MODE=both
+ADMIN_AUTH_SSO_PROVIDERS=saml
+ADMIN_AUTH_SESSION_SECRET=aapm://idmmw-admin-session-credential
+ADMIN_AUTH_LOCAL_USERNAME=admin
+ADMIN_AUTH_LOCAL_PASSWORD=aapm://idmmw-admin-local-credential
+ADMIN_AUTH_ALLOWED_GROUPS=idmmw-admins,idmmw-linux-operators
+
+ADMIN_AUTH_SAML_ENTRYPOINT=https://fam.example.ru/saml/login
+ADMIN_AUTH_SAML_ISSUER=https://idmmw.example.ru/saml/metadata
+ADMIN_AUTH_SAML_CALLBACK_URL=https://idmmw.example.ru/auth/saml/acs
+ADMIN_AUTH_SAML_IDP_ISSUER=https://fam.example.ru/saml
+ADMIN_AUTH_SAML_IDP_CERT=aapm://fam-saml-idp-cert
+ADMIN_AUTH_SAML_SP_CERT=aapm://idmmw-saml-sp-cert
+ADMIN_AUTH_SAML_SP_PRIVATE_KEY=aapm://idmmw-saml-sp-private-key
+ADMIN_AUTH_SAML_USER_ATTRIBUTE=nameID
+ADMIN_AUTH_SAML_GROUPS_ATTRIBUTE=groups
+```
+
+OIDC callback URL: `/auth/oidc/callback`.
+SAML ACS URL: `/auth/saml/acs`.
+SAML SP metadata URL: `/auth/saml/metadata`.
+
+SAML работает только в SP-initiated режиме: вход начинается с
+`GET /auth/saml/login`, а ACS принимает только assertion с валидным
+`InResponseTo`, соответствующим ранее выпущенному AuthnRequest. IdP-initiated
+SSO не поддерживается. `ADMIN_AUTH_SAML_IDP_ISSUER` должен совпадать с issuer
+IdP из SAML response.
+
+В API статуса сессии значения `user.provider` фиксированы:
+`local`, `header-sso`, `oidc`, `saml` или `disabled`. Legacy значение
+`sso` для reverse-proxy/header SSO не поддерживается.
+
+Для provider `header` дополнительно обязателен `ADMIN_AUTH_TRUSTED_PROXY_CIDRS`.
+Для direct `oidc`/`saml` trusted proxy CIDR не требуется, потому что idmMw сам
+валидирует OIDC callback или SAML assertion.
 
 ## Настройка в Avanpost IDM
 

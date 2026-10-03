@@ -2,15 +2,26 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent, RefObject } from 'react';
 import {
   clearRuntimeLogs,
+  createLinuxCredentialProfile,
+  createLinuxHost,
+  createLinuxServerGroup,
   createTargetSystem,
   deleteTargetSystem,
   disableRuntimeDebug,
   enableRuntimeDebug,
+  fetchLinuxCredentialProfiles,
+  fetchLinuxHosts,
+  fetchLinuxServerGroups,
   fetchRuntimeDebugStatus,
   fetchRuntimeLogs,
   fetchTargetSystems,
+  setLinuxServerGroupHosts,
   testTargetSystemConnection,
   updateTargetSystem,
+  type LinuxCredentialProfile,
+  type LinuxHost,
+  type LinuxServerGroup,
+  type EffectiveAdminPermissions,
   type RuntimeDebugSession,
   type RuntimeLogEvent,
   type TargetSystem,
@@ -23,6 +34,7 @@ const TYPE_OPTIONS = [
   'consultant-plus',
   'rest',
   'db',
+  'linux',
   'fake',
 ];
 
@@ -55,6 +67,31 @@ interface TargetSystemForm {
   enabled: boolean;
 }
 
+interface LinuxProfileForm {
+  name: string;
+  mode: 'env' | 'aapm';
+  username: string;
+  privateKeyRef: string;
+  passwordRef: string;
+  enabled: boolean;
+}
+
+interface LinuxHostForm {
+  name: string;
+  host: string;
+  port: string;
+  hostFingerprint: string;
+  credentialProfileId: string;
+  enabled: boolean;
+}
+
+interface LinuxGroupForm {
+  code: string;
+  name: string;
+  description: string;
+  enabled: boolean;
+}
+
 const DEFAULT_RETRY_POLICY_FORM: RetryPolicyForm = {
   maxRetries: '',
   baseDelayMs: '',
@@ -72,6 +109,8 @@ const EMPTY_FORM: TargetSystemForm = {
   extraConfig: {},
   enabled: true,
 };
+
+type PermissionsStatus = 'loading' | 'ready' | 'failed';
 
 const TYPE_FIELDS: Record<string, ConfigField[]> = {
   zabbix: [
@@ -315,6 +354,51 @@ const TYPE_FIELDS: Record<string, ConfigField[]> = {
     { name: 'username', label: 'Username (Oracle)' },
     { name: 'password', label: 'Password (Oracle)', inputType: 'password' },
   ],
+  linux: [
+    {
+      name: 'provider',
+      label: 'Provider',
+      defaultValue: 'ssh-sudo-fleet',
+      options: [
+        { value: 'ssh-sudo-fleet', label: 'ssh-sudo-fleet' },
+        { value: 'ssh-sudo', label: 'ssh-sudo' },
+        { value: 'remote-agent', label: 'remote-agent' },
+      ],
+      help: 'Fleet mode maps IDM serverGroups to idmMw managed Linux hosts.',
+    },
+    {
+      name: 'diagnosticTargetSystem',
+      label: 'Diagnostic target system',
+      help: 'Optional TargetSystem.name used by direct Test when the payload targetSystem is unavailable.',
+    },
+    {
+      name: 'defaultShell',
+      label: 'Default shell',
+      placeholder: '/bin/bash',
+    },
+    {
+      name: 'defaultHomeBase',
+      label: 'Default home base',
+      placeholder: '/home',
+    },
+    {
+      name: 'defaultGroups',
+      label: 'Default POSIX groups (JSON)',
+      inputType: 'json',
+      placeholder: '["users"]',
+    },
+    {
+      name: 'sudoMode',
+      label: 'Sudo mode',
+      defaultValue: 'passwordless',
+      options: [{ value: 'passwordless', label: 'passwordless' }],
+    },
+    {
+      name: 'timeoutMs',
+      label: 'Timeout ms',
+      placeholder: '30000',
+    },
+  ],
   fake: [
     { name: 'baseUrl', label: 'Base URL' },
     { name: 'apiKey', label: 'API key', inputType: 'password' },
@@ -322,9 +406,10 @@ const TYPE_FIELDS: Record<string, ConfigField[]> = {
   ],
 };
 
-function newForm(): TargetSystemForm {
+function newForm(type = 'zabbix'): TargetSystemForm {
   return {
     ...EMPTY_FORM,
+    type,
     configValues: {},
     retryPolicy: { ...DEFAULT_RETRY_POLICY_FORM },
     extraConfig: {},
@@ -558,13 +643,48 @@ function RuntimeLogEntry({ item }: { item: RuntimeLogEvent }) {
   );
 }
 
-export function TargetSystemsPage() {
+function canWriteConnector(
+  effective: EffectiveAdminPermissions | null | undefined,
+  connectorType: string,
+  authEnabled = true,
+): boolean {
+  if (!authEnabled) return true;
+  if (!effective) return false;
+  if (effective.superadmin) return true;
+  return effective.permissions.some(
+    (permission) =>
+      permission.connectorType === connectorType && permission.canWrite,
+  );
+}
+
+export function TargetSystemsPage({
+  authEnabled = true,
+  effectivePermissions,
+  permissionsStatus = 'ready',
+}: {
+  authEnabled?: boolean;
+  effectivePermissions?: EffectiveAdminPermissions | null;
+  permissionsStatus?: PermissionsStatus;
+}) {
+  const permissionsReady =
+    !authEnabled || (permissionsStatus === 'ready' && !!effectivePermissions);
+  const writableTypes =
+    !authEnabled || effectivePermissions?.superadmin
+      ? TYPE_OPTIONS
+      : permissionsReady
+        ? TYPE_OPTIONS.filter((type) =>
+            canWriteConnector(effectivePermissions, type, authEnabled),
+          )
+        : [];
+  const defaultWritableType = writableTypes[0] ?? 'zabbix';
   const [items, setItems] = useState<TargetSystem[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [testingId, setTestingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [form, setForm] = useState<TargetSystemForm>(() => newForm());
+  const [form, setForm] = useState<TargetSystemForm>(() =>
+    newForm(defaultWritableType),
+  );
   const [editing, setEditing] = useState(false);
   const [formExpanded, setFormExpanded] = useState(false);
   const [message, setMessage] = useState('');
@@ -579,6 +699,41 @@ export function TargetSystemsPage() {
   const [debugLevel, setDebugLevel] = useState<'Basic' | 'Verbose'>('Basic');
   const [debugTtlSeconds, setDebugTtlSeconds] = useState(300);
   const [debugSaving, setDebugSaving] = useState(false);
+  const [linuxFleetTarget, setLinuxFleetTarget] = useState<TargetSystem | null>(
+    null,
+  );
+  const [linuxProfiles, setLinuxProfiles] = useState<LinuxCredentialProfile[]>(
+    [],
+  );
+  const [linuxHosts, setLinuxHosts] = useState<LinuxHost[]>([]);
+  const [linuxGroups, setLinuxGroups] = useState<LinuxServerGroup[]>([]);
+  const [linuxFleetLoading, setLinuxFleetLoading] = useState(false);
+  const [linuxFleetSaving, setLinuxFleetSaving] = useState(false);
+  const [linuxProfileForm, setLinuxProfileForm] = useState<LinuxProfileForm>({
+    name: '',
+    mode: 'env',
+    username: '',
+    privateKeyRef: '',
+    passwordRef: '',
+    enabled: true,
+  });
+  const [linuxHostForm, setLinuxHostForm] = useState<LinuxHostForm>({
+    name: '',
+    host: '',
+    port: '22',
+    hostFingerprint: '',
+    credentialProfileId: '',
+    enabled: true,
+  });
+  const [linuxGroupForm, setLinuxGroupForm] = useState<LinuxGroupForm>({
+    code: '',
+    name: '',
+    description: '',
+    enabled: true,
+  });
+  const [linuxGroupHostDrafts, setLinuxGroupHostDrafts] = useState<
+    Record<string, string[]>
+  >({});
   const lastModalTriggerRef = useRef<HTMLElement | null>(null);
   const logsPanelRef = useRef<HTMLDivElement | null>(null);
   const logsCloseRef = useRef<HTMLButtonElement | null>(null);
@@ -603,6 +758,43 @@ export function TargetSystemsPage() {
     }, 0);
     return () => window.clearTimeout(timer);
   }, [load]);
+
+  const loadLinuxFleet = useCallback(async (target: TargetSystem) => {
+    setLinuxFleetLoading(true);
+    try {
+      const [profiles, hosts, groups] = await Promise.all([
+        fetchLinuxCredentialProfiles(target.id),
+        fetchLinuxHosts(target.id),
+        fetchLinuxServerGroups(target.id),
+      ]);
+      setLinuxProfiles(profiles);
+      setLinuxHosts(hosts);
+      setLinuxGroups(groups);
+      setLinuxGroupHostDrafts(
+        Object.fromEntries(
+          groups.map((group) => [
+            group.id,
+            hosts
+              .filter((host) =>
+                (host.groups ?? []).some(
+                  (membershipGroup) => membershipGroup.id === group.id,
+                ),
+              )
+              .map((host) => host.id),
+          ]),
+        ),
+      );
+    } catch (e: unknown) {
+      setMessage(`Error: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setLinuxFleetLoading(false);
+    }
+  }, []);
+
+  const openLinuxFleet = async (target: TargetSystem) => {
+    setLinuxFleetTarget(target);
+    await loadLinuxFleet(target);
+  };
 
   const loadDebugStatus = useCallback(async () => {
     try {
@@ -708,10 +900,23 @@ export function TargetSystemsPage() {
   }, [debugTarget]);
 
   const resetForm = () => {
-    setForm(newForm());
+    setForm(newForm(defaultWritableType));
     setEditing(false);
     setFormExpanded(false);
     setMessage('');
+  };
+
+  const toggleFormExpanded = () => {
+    const nextExpanded = !formExpanded;
+    if (
+      nextExpanded &&
+      !editing &&
+      writableTypes.length > 0 &&
+      !writableTypes.includes(form.type)
+    ) {
+      setForm(newForm(defaultWritableType));
+    }
+    setFormExpanded(nextExpanded);
   };
 
   const handleSave = async () => {
@@ -820,6 +1025,122 @@ export function TargetSystemsPage() {
     }
   };
 
+  const handleCreateLinuxProfile = async () => {
+    if (!linuxFleetTarget) return;
+    setLinuxFleetSaving(true);
+    try {
+      await createLinuxCredentialProfile(linuxFleetTarget.id, {
+        name: linuxProfileForm.name,
+        mode: linuxProfileForm.mode,
+        username: linuxProfileForm.username,
+        privateKeyRef: linuxProfileForm.privateKeyRef || undefined,
+        passwordRef: linuxProfileForm.passwordRef || undefined,
+        enabled: linuxProfileForm.enabled,
+      });
+      setLinuxProfileForm({
+        name: '',
+        mode: 'env',
+        username: '',
+        privateKeyRef: '',
+        passwordRef: '',
+        enabled: true,
+      });
+      await loadLinuxFleet(linuxFleetTarget);
+      setMessage('Linux credential profile created');
+    } catch (e: unknown) {
+      setMessage(`Error: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setLinuxFleetSaving(false);
+    }
+  };
+
+  const handleCreateLinuxHost = async () => {
+    if (!linuxFleetTarget) return;
+    setLinuxFleetSaving(true);
+    try {
+      await createLinuxHost(linuxFleetTarget.id, {
+        name: linuxHostForm.name,
+        host: linuxHostForm.host,
+        port: positiveInteger(linuxHostForm.port),
+        hostFingerprint: linuxHostForm.hostFingerprint,
+        credentialProfileId: linuxHostForm.credentialProfileId || null,
+        enabled: linuxHostForm.enabled,
+      });
+      setLinuxHostForm({
+        name: '',
+        host: '',
+        port: '22',
+        hostFingerprint: '',
+        credentialProfileId: '',
+        enabled: true,
+      });
+      await loadLinuxFleet(linuxFleetTarget);
+      setMessage('Linux host created');
+    } catch (e: unknown) {
+      setMessage(`Error: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setLinuxFleetSaving(false);
+    }
+  };
+
+  const handleCreateLinuxGroup = async () => {
+    if (!linuxFleetTarget) return;
+    setLinuxFleetSaving(true);
+    try {
+      await createLinuxServerGroup(linuxFleetTarget.id, {
+        code: linuxGroupForm.code,
+        name: linuxGroupForm.name,
+        description: linuxGroupForm.description || undefined,
+        enabled: linuxGroupForm.enabled,
+      });
+      setLinuxGroupForm({
+        code: '',
+        name: '',
+        description: '',
+        enabled: true,
+      });
+      await loadLinuxFleet(linuxFleetTarget);
+      setMessage('Linux server group created');
+    } catch (e: unknown) {
+      setMessage(`Error: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setLinuxFleetSaving(false);
+    }
+  };
+
+  const handleSaveLinuxGroupHosts = async (groupId: string) => {
+    if (!linuxFleetTarget) return;
+    setLinuxFleetSaving(true);
+    try {
+      await setLinuxServerGroupHosts(
+        groupId,
+        linuxGroupHostDrafts[groupId] ?? [],
+      );
+      await loadLinuxFleet(linuxFleetTarget);
+      setMessage('Linux server group hosts saved');
+    } catch (e: unknown) {
+      setMessage(`Error: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setLinuxFleetSaving(false);
+    }
+  };
+
+  const toggleLinuxGroupHost = (
+    groupId: string,
+    hostId: string,
+    checked: boolean,
+  ) => {
+    setLinuxGroupHostDrafts((current) => {
+      const ids = new Set(current[groupId] ?? []);
+      if (checked) {
+        ids.add(hostId);
+      } else {
+        ids.delete(hostId);
+      }
+      return { ...current, [groupId]: [...ids] };
+    });
+  };
+
   const restoreModalFocus = useCallback(() => {
     lastModalTriggerRef.current?.focus();
     lastModalTriggerRef.current = null;
@@ -899,6 +1220,19 @@ export function TargetSystemsPage() {
 
   const currentFields = TYPE_FIELDS[form.type] ?? [];
   const extraConfigEntries = Object.entries(form.extraConfig);
+  const canSaveCurrentForm = canWriteConnector(
+    effectivePermissions,
+    form.type,
+    authEnabled,
+  );
+  const createReadonlyReason =
+    writableTypes.length === 0
+      ? permissionsStatus === 'failed'
+        ? 'Cannot load RBAC permissions. Create and edit actions are disabled.'
+        : permissionsStatus === 'loading'
+          ? 'Loading RBAC permissions. Create and edit actions are disabled.'
+          : 'No write permissions for target system connector types.'
+      : '';
   const formPanelId = 'target-system-form-panel';
   const activeDebugForTarget = (targetSystem: string) =>
     debugSessions.filter((session) => session.targetSystem === targetSystem);
@@ -948,7 +1282,7 @@ export function TargetSystemsPage() {
             type="button"
             aria-expanded={formExpanded}
             aria-controls={formPanelId}
-            onClick={() => setFormExpanded((expanded) => !expanded)}
+            onClick={toggleFormExpanded}
           >
             <span className="disclosure-indicator" aria-hidden="true">
               {formExpanded ? 'v' : '>'}
@@ -968,11 +1302,15 @@ export function TargetSystemsPage() {
 
         {formExpanded && (
           <div className="collapsible-panel-body" id={formPanelId}>
+            {createReadonlyReason && (
+              <div className="error-text">{createReadonlyReason}</div>
+            )}
             <div className="form-grid">
               <label>
                 Name
                 <input
                   value={form.name}
+                  disabled={!!createReadonlyReason}
                   onChange={(e) => setForm({ ...form, name: e.target.value })}
                 />
               </label>
@@ -980,6 +1318,7 @@ export function TargetSystemsPage() {
                 Type
                 <select
                   value={form.type}
+                  disabled={!!createReadonlyReason}
                   onChange={(e) =>
                     setForm({
                       ...form,
@@ -989,7 +1328,7 @@ export function TargetSystemsPage() {
                     })
                   }
                 >
-                  {TYPE_OPTIONS.map((type) => (
+                  {writableTypes.map((type) => (
                     <option key={type} value={type}>
                       {type}
                     </option>
@@ -1000,6 +1339,7 @@ export function TargetSystemsPage() {
                 Label
                 <input
                   value={form.label}
+                  disabled={!!createReadonlyReason}
                   onChange={(e) => setForm({ ...form, label: e.target.value })}
                 />
               </label>
@@ -1007,6 +1347,7 @@ export function TargetSystemsPage() {
                 <input
                   type="checkbox"
                   checked={form.enabled}
+                  disabled={!!createReadonlyReason}
                   onChange={(e) =>
                     setForm({ ...form, enabled: e.target.checked })
                   }
@@ -1023,6 +1364,7 @@ export function TargetSystemsPage() {
                     {field.label}
                     {field.options ? (
                       <select
+                        disabled={!!createReadonlyReason}
                         value={
                           form.configValues[field.name] ??
                           field.defaultValue ??
@@ -1049,6 +1391,7 @@ export function TargetSystemsPage() {
                         className="mono"
                         rows={5}
                         placeholder={field.placeholder}
+                        disabled={!!createReadonlyReason}
                         value={form.configValues[field.name] ?? ''}
                         onChange={(e) =>
                           setForm({
@@ -1064,6 +1407,7 @@ export function TargetSystemsPage() {
                       <input
                         type={field.inputType ?? 'text'}
                         placeholder={field.placeholder}
+                        disabled={!!createReadonlyReason}
                         value={form.configValues[field.name] ?? ''}
                         onChange={(e) =>
                           setForm({
@@ -1117,6 +1461,7 @@ export function TargetSystemsPage() {
                   <input
                     inputMode="numeric"
                     value={form.retryPolicy.maxRetries}
+                    disabled={!!createReadonlyReason}
                     onChange={(e) =>
                       setForm({
                         ...form,
@@ -1133,6 +1478,7 @@ export function TargetSystemsPage() {
                   <input
                     inputMode="numeric"
                     value={form.retryPolicy.baseDelayMs}
+                    disabled={!!createReadonlyReason}
                     onChange={(e) =>
                       setForm({
                         ...form,
@@ -1149,6 +1495,7 @@ export function TargetSystemsPage() {
                   <input
                     inputMode="numeric"
                     value={form.retryPolicy.maxDelayMs}
+                    disabled={!!createReadonlyReason}
                     onChange={(e) =>
                       setForm({
                         ...form,
@@ -1165,6 +1512,7 @@ export function TargetSystemsPage() {
                   <input
                     inputMode="numeric"
                     value={form.retryPolicy.dlqLeaseSeconds}
+                    disabled={!!createReadonlyReason}
                     onChange={(e) =>
                       setForm({
                         ...form,
@@ -1180,6 +1528,7 @@ export function TargetSystemsPage() {
                   <input
                     type="checkbox"
                     checked={form.retryPolicy.jitter}
+                    disabled={!!createReadonlyReason}
                     onChange={(e) =>
                       setForm({
                         ...form,
@@ -1198,7 +1547,7 @@ export function TargetSystemsPage() {
             <button
               className="button primary"
               onClick={handleSave}
-              disabled={saving}
+              disabled={saving || !!createReadonlyReason || !canSaveCurrentForm}
             >
               {saving ? 'Saving...' : editing ? 'Update' : 'Create'}
             </button>
@@ -1247,7 +1596,14 @@ export function TargetSystemsPage() {
                     <button
                       className="button small"
                       onClick={() => handleTest(item.id)}
-                      disabled={testingId === item.id}
+                      disabled={
+                        testingId === item.id ||
+                        !canWriteConnector(
+                          effectivePermissions,
+                          item.type,
+                          authEnabled,
+                        )
+                      }
                     >
                       {testingId === item.id ? 'Testing...' : 'Test'}
                     </button>
@@ -1268,16 +1624,38 @@ export function TargetSystemsPage() {
                         </span>
                       )}
                     </button>
+                    {item.type === 'linux' && (
+                      <button
+                        className="button small"
+                        onClick={() => void openLinuxFleet(item)}
+                      >
+                        Fleet
+                      </button>
+                    )}
                     <button
                       className="button small"
                       onClick={() => handleEdit(item)}
+                      disabled={
+                        !canWriteConnector(
+                          effectivePermissions,
+                          item.type,
+                          authEnabled,
+                        )
+                      }
                     >
                       Edit
                     </button>
                     <button
                       className="button danger small"
                       onClick={() => handleDelete(item.id)}
-                      disabled={deletingId === item.id}
+                      disabled={
+                        deletingId === item.id ||
+                        !canWriteConnector(
+                          effectivePermissions,
+                          item.type,
+                          authEnabled,
+                        )
+                      }
                     >
                       {deletingId === item.id ? 'Deleting...' : 'Delete'}
                     </button>
@@ -1288,6 +1666,392 @@ export function TargetSystemsPage() {
           })}
         </tbody>
       </table>
+
+      {linuxFleetTarget && (
+        <section className="panel linux-fleet-panel">
+          <div className="section-title-row">
+            <h2>Linux Fleet: {linuxFleetTarget.name}</h2>
+            <div className="actions">
+              <button
+                className="button"
+                onClick={() => void loadLinuxFleet(linuxFleetTarget)}
+                disabled={linuxFleetLoading}
+              >
+                {linuxFleetLoading ? 'Loading...' : 'Refresh'}
+              </button>
+              <button
+                className="button"
+                onClick={() => setLinuxFleetTarget(null)}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+
+          <div className="fleet-grid">
+            <section className="fleet-column">
+              <h3>Credential profiles</h3>
+              <div className="form-grid single">
+                <label>
+                  Name
+                  <input
+                    value={linuxProfileForm.name}
+                    onChange={(e) =>
+                      setLinuxProfileForm({
+                        ...linuxProfileForm,
+                        name: e.target.value,
+                      })
+                    }
+                  />
+                </label>
+                <label>
+                  Mode
+                  <select
+                    value={linuxProfileForm.mode}
+                    onChange={(e) =>
+                      setLinuxProfileForm({
+                        ...linuxProfileForm,
+                        mode: e.target.value === 'aapm' ? 'aapm' : 'env',
+                      })
+                    }
+                  >
+                    <option value="env">env</option>
+                    <option value="aapm">aapm</option>
+                  </select>
+                </label>
+                <label>
+                  Username
+                  <input
+                    value={linuxProfileForm.username}
+                    onChange={(e) =>
+                      setLinuxProfileForm({
+                        ...linuxProfileForm,
+                        username: e.target.value,
+                      })
+                    }
+                  />
+                </label>
+                <label>
+                  Private key ref
+                  <input
+                    placeholder="env:LINUX_SSH_KEY"
+                    value={linuxProfileForm.privateKeyRef}
+                    onChange={(e) =>
+                      setLinuxProfileForm({
+                        ...linuxProfileForm,
+                        privateKeyRef: e.target.value,
+                      })
+                    }
+                  />
+                </label>
+                <label>
+                  Password ref
+                  <input
+                    placeholder="env:LINUX_SSH_PASSWORD"
+                    value={linuxProfileForm.passwordRef}
+                    onChange={(e) =>
+                      setLinuxProfileForm({
+                        ...linuxProfileForm,
+                        passwordRef: e.target.value,
+                      })
+                    }
+                  />
+                </label>
+                <label className="checkbox-row">
+                  <input
+                    type="checkbox"
+                    checked={linuxProfileForm.enabled}
+                    onChange={(e) =>
+                      setLinuxProfileForm({
+                        ...linuxProfileForm,
+                        enabled: e.target.checked,
+                      })
+                    }
+                  />
+                  Enabled
+                </label>
+                <button
+                  className="button primary"
+                  onClick={() => void handleCreateLinuxProfile()}
+                  disabled={
+                    linuxFleetSaving ||
+                    !canWriteConnector(
+                      effectivePermissions,
+                      linuxFleetTarget.type,
+                      authEnabled,
+                    )
+                  }
+                >
+                  Add profile
+                </button>
+              </div>
+              <table className="data-table compact-table">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Mode</th>
+                    <th>User</th>
+                    <th>Enabled</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {linuxProfiles.map((profile) => (
+                    <tr key={profile.id}>
+                      <td>{profile.name}</td>
+                      <td>{profile.mode}</td>
+                      <td className="mono">{profile.username}</td>
+                      <td>{profile.enabled ? 'yes' : 'no'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </section>
+
+            <section className="fleet-column">
+              <h3>Hosts</h3>
+              <div className="form-grid single">
+                <label>
+                  Name
+                  <input
+                    value={linuxHostForm.name}
+                    onChange={(e) =>
+                      setLinuxHostForm({
+                        ...linuxHostForm,
+                        name: e.target.value,
+                      })
+                    }
+                  />
+                </label>
+                <label>
+                  Host
+                  <input
+                    value={linuxHostForm.host}
+                    onChange={(e) =>
+                      setLinuxHostForm({
+                        ...linuxHostForm,
+                        host: e.target.value,
+                      })
+                    }
+                  />
+                </label>
+                <label>
+                  Port
+                  <input
+                    inputMode="numeric"
+                    value={linuxHostForm.port}
+                    onChange={(e) =>
+                      setLinuxHostForm({
+                        ...linuxHostForm,
+                        port: e.target.value,
+                      })
+                    }
+                  />
+                </label>
+                <label>
+                  Host fingerprint
+                  <input
+                    value={linuxHostForm.hostFingerprint}
+                    onChange={(e) =>
+                      setLinuxHostForm({
+                        ...linuxHostForm,
+                        hostFingerprint: e.target.value,
+                      })
+                    }
+                  />
+                </label>
+                <label>
+                  Credential profile
+                  <select
+                    value={linuxHostForm.credentialProfileId}
+                    onChange={(e) =>
+                      setLinuxHostForm({
+                        ...linuxHostForm,
+                        credentialProfileId: e.target.value,
+                      })
+                    }
+                  >
+                    <option value="">None</option>
+                    {linuxProfiles.map((profile) => (
+                      <option key={profile.id} value={profile.id}>
+                        {profile.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="checkbox-row">
+                  <input
+                    type="checkbox"
+                    checked={linuxHostForm.enabled}
+                    onChange={(e) =>
+                      setLinuxHostForm({
+                        ...linuxHostForm,
+                        enabled: e.target.checked,
+                      })
+                    }
+                  />
+                  Enabled
+                </label>
+                <button
+                  className="button primary"
+                  onClick={() => void handleCreateLinuxHost()}
+                  disabled={
+                    linuxFleetSaving ||
+                    !canWriteConnector(
+                      effectivePermissions,
+                      linuxFleetTarget.type,
+                      authEnabled,
+                    )
+                  }
+                >
+                  Add host
+                </button>
+              </div>
+              <table className="data-table compact-table">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Host</th>
+                    <th>Profile</th>
+                    <th>Enabled</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {linuxHosts.map((host) => (
+                    <tr key={host.id}>
+                      <td>{host.name}</td>
+                      <td className="mono">
+                        {host.host}:{host.port}
+                      </td>
+                      <td>{host.credentialProfile?.name ?? 'none'}</td>
+                      <td>{host.enabled ? 'yes' : 'no'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </section>
+          </div>
+
+          <section className="fleet-groups">
+            <h3>Server groups exposed to Avanpost IDM</h3>
+            <div className="form-grid">
+              <label>
+                Code
+                <input
+                  value={linuxGroupForm.code}
+                  onChange={(e) =>
+                    setLinuxGroupForm({
+                      ...linuxGroupForm,
+                      code: e.target.value,
+                    })
+                  }
+                />
+              </label>
+              <label>
+                Name
+                <input
+                  value={linuxGroupForm.name}
+                  onChange={(e) =>
+                    setLinuxGroupForm({
+                      ...linuxGroupForm,
+                      name: e.target.value,
+                    })
+                  }
+                />
+              </label>
+              <label>
+                Description
+                <input
+                  value={linuxGroupForm.description}
+                  onChange={(e) =>
+                    setLinuxGroupForm({
+                      ...linuxGroupForm,
+                      description: e.target.value,
+                    })
+                  }
+                />
+              </label>
+              <label className="checkbox-row">
+                <input
+                  type="checkbox"
+                  checked={linuxGroupForm.enabled}
+                  onChange={(e) =>
+                    setLinuxGroupForm({
+                      ...linuxGroupForm,
+                      enabled: e.target.checked,
+                    })
+                  }
+                />
+                Enabled
+              </label>
+              <button
+                className="button primary"
+                onClick={() => void handleCreateLinuxGroup()}
+                disabled={
+                  linuxFleetSaving ||
+                  !canWriteConnector(
+                    effectivePermissions,
+                    linuxFleetTarget.type,
+                    authEnabled,
+                  )
+                }
+              >
+                Add server group
+              </button>
+            </div>
+
+            <div className="fleet-group-list">
+              {linuxGroups.map((group) => (
+                <article className="fleet-group-row" key={group.id}>
+                  <div>
+                    <strong className="mono">{group.code}</strong>
+                    <span> {group.name}</span>
+                    <span className="field-help">
+                      {group.hostCount ?? 0} hosts
+                    </span>
+                  </div>
+                  <div className="fleet-host-checks">
+                    {linuxHosts.map((host) => (
+                      <label className="checkbox-row" key={host.id}>
+                        <input
+                          type="checkbox"
+                          checked={(
+                            linuxGroupHostDrafts[group.id] ?? []
+                          ).includes(host.id)}
+                          onChange={(e) =>
+                            toggleLinuxGroupHost(
+                              group.id,
+                              host.id,
+                              e.target.checked,
+                            )
+                          }
+                        />
+                        {host.name}
+                      </label>
+                    ))}
+                  </div>
+                  <button
+                    className="button small"
+                    onClick={() => void handleSaveLinuxGroupHosts(group.id)}
+                    disabled={
+                      linuxFleetSaving ||
+                      !canWriteConnector(
+                        effectivePermissions,
+                        linuxFleetTarget.type,
+                        authEnabled,
+                      )
+                    }
+                  >
+                    Save hosts
+                  </button>
+                </article>
+              ))}
+              {linuxGroups.length === 0 && (
+                <div className="empty-state">No Linux server groups.</div>
+              )}
+            </div>
+          </section>
+        </section>
+      )}
 
       {logsTarget && (
         <div
@@ -1349,7 +2113,9 @@ export function TargetSystemsPage() {
                   No buffered logs for this target system.
                 </div>
               ) : (
-                logs.map((item) => <RuntimeLogEntry item={item} key={item.id} />)
+                logs.map((item) => (
+                  <RuntimeLogEntry item={item} key={item.id} />
+                ))
               )}
             </div>
           </div>

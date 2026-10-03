@@ -60,8 +60,118 @@ model TargetSystem {
   enabled   Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  linuxHosts LinuxHost[]
+  linuxServerGroups LinuxServerGroup[]
+  linuxCredentialProfiles LinuxCredentialProfile[]
 
   @@index([type, enabled])
+}
+
+model AdminRole {
+  id          String   @id @default(uuid())
+  code        String   @unique
+  name        String
+  description String?
+  system      Boolean  @default(false)
+  enabled     Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  permissions AdminRoleConnectorPermission[]
+  groupMappings AdminGroupRoleMapping[]
+
+  @@index([enabled])
+}
+
+model AdminRoleConnectorPermission {
+  id            String   @id @default(uuid())
+  roleId        String
+  connectorType String
+  canRead       Boolean  @default(false)
+  canWrite      Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  role          AdminRole @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, connectorType])
+  @@index([connectorType])
+}
+
+model AdminGroupRoleMapping {
+  id        String   @id @default(uuid())
+  idpGroup  String
+  roleId    String
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  role      AdminRole @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([idpGroup, roleId])
+  @@index([idpGroup, enabled])
+}
+
+model LinuxCredentialProfile {
+  id             String   @id @default(uuid())
+  targetSystemId String
+  name           String
+  mode           String
+  username       String
+  privateKeyRef  String?
+  passwordRef    String?
+  enabled        Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  targetSystem   TargetSystem @relation(fields: [targetSystemId], references: [id], onDelete: Cascade)
+  hosts          LinuxHost[]
+
+  @@unique([targetSystemId, name])
+  @@index([targetSystemId, enabled])
+}
+
+model LinuxHost {
+  id                  String   @id @default(uuid())
+  targetSystemId      String
+  credentialProfileId String?
+  name                String
+  host                String
+  port                Int      @default(22)
+  hostFingerprint     String
+  enabled             Boolean  @default(true)
+  metadata            String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  targetSystem        TargetSystem @relation(fields: [targetSystemId], references: [id], onDelete: Cascade)
+  credentialProfile   LinuxCredentialProfile? @relation(fields: [credentialProfileId], references: [id], onDelete: SetNull)
+  groups              LinuxServerGroupHost[]
+
+  @@unique([targetSystemId, name])
+  @@index([targetSystemId, enabled])
+  @@index([credentialProfileId])
+}
+
+model LinuxServerGroup {
+  id             String   @id @default(uuid())
+  targetSystemId String
+  code           String
+  name           String
+  description    String?
+  enabled        Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  targetSystem   TargetSystem @relation(fields: [targetSystemId], references: [id], onDelete: Cascade)
+  hosts          LinuxServerGroupHost[]
+
+  @@unique([targetSystemId, code])
+  @@index([targetSystemId, enabled])
+}
+
+model LinuxServerGroupHost {
+  groupId String
+  hostId  String
+  group   LinuxServerGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  host    LinuxHost @relation(fields: [hostId], references: [id], onDelete: Cascade)
+
+  @@id([groupId, hostId])
+  @@index([hostId])
 }
 
 model EncryptionState {

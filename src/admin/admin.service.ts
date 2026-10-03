@@ -11,6 +11,7 @@ interface RetryManyParams {
   targetSystem?: string;
   status?: string;
   limit?: number;
+  allowedTargetSystems?: string[];
 }
 
 @Injectable()
@@ -30,11 +31,19 @@ export class AdminService {
     targetSystem?: string;
     limit?: number;
     offset?: number;
+    allowedTargetSystems?: string[];
   }) {
+    if (params.allowedTargetSystems && params.allowedTargetSystems.length === 0) {
+      return [];
+    }
     const items = await this.prisma.dlqItem.findMany({
       where: {
         ...(params.status ? { status: params.status } : {}),
-        ...(params.targetSystem ? { targetSystem: params.targetSystem } : {}),
+        ...(params.targetSystem
+          ? { targetSystem: params.targetSystem }
+          : params.allowedTargetSystems
+            ? { targetSystem: { in: params.allowedTargetSystems } }
+            : {}),
       },
       take: this.limit(params.limit, 50, 200),
       skip: this.offset(params.offset),
@@ -50,7 +59,15 @@ export class AdminService {
     await this.dlq.updateMetrics();
   }
 
-  async stats(): Promise<{
+  async findDlqItemTargetSystem(id: string): Promise<string | null> {
+    const item = await this.prisma.dlqItem.findUnique({
+      where: { id },
+      select: { targetSystem: true },
+    });
+    return item?.targetSystem ?? null;
+  }
+
+  async stats(params: { allowedTargetSystems?: string[] } = {}): Promise<{
     dlq: Record<string, number>;
     processedLast5Minutes: ReturnType<MetricsService['processedLast5Minutes']>;
     infrastructure: {
@@ -59,9 +76,24 @@ export class AdminService {
       processingMode: string;
     };
   }> {
+    if (params.allowedTargetSystems && params.allowedTargetSystems.length === 0) {
+      return {
+        dlq: { pending: 0, retrying: 0, skipped: 0, resolved: 0 },
+        processedLast5Minutes: { total: 0, byStatus: {}, byTargetSystem: {} },
+        infrastructure: {
+          kafkaEnabled: this.config.get<boolean>('KAFKA_ENABLED') ?? false,
+          redisEnabled: this.config.get<boolean>('REDIS_ENABLED') ?? false,
+          processingMode:
+            this.config.get<string>('IDMMW_PROCESSING_MODE') ?? 'sync',
+        },
+      };
+    }
     const counts = await this.prisma.dlqItem.groupBy({
       by: ['status'],
       _count: { status: true },
+      where: params.allowedTargetSystems
+        ? { targetSystem: { in: params.allowedTargetSystems } }
+        : undefined,
     });
     const dlq = Object.fromEntries(
       ['pending', 'retrying', 'skipped', 'resolved'].map((status) => [
@@ -69,9 +101,12 @@ export class AdminService {
         counts.find((row) => row.status === status)?._count.status ?? 0,
       ]),
     );
+    const processed = this.filteredProcessedLast5Minutes(
+      params.allowedTargetSystems,
+    );
     return {
       dlq,
-      processedLast5Minutes: this.metrics.processedLast5Minutes(),
+      processedLast5Minutes: processed,
       infrastructure: {
         kafkaEnabled: this.config.get<boolean>('KAFKA_ENABLED') ?? false,
         redisEnabled: this.config.get<boolean>('REDIS_ENABLED') ?? false,
@@ -101,10 +136,17 @@ export class AdminService {
     skipped: number;
     errors: Array<{ id: string; error: string }>;
   }> {
+    if (params.allowedTargetSystems && params.allowedTargetSystems.length === 0) {
+      return { requested: 0, queued: 0, skipped: 0, errors: [] };
+    }
     const items = await this.prisma.dlqItem.findMany({
       where: {
         status: params.status ?? 'pending',
-        ...(params.targetSystem ? { targetSystem: params.targetSystem } : {}),
+        ...(params.targetSystem
+          ? { targetSystem: params.targetSystem }
+          : params.allowedTargetSystems
+            ? { targetSystem: { in: params.allowedTargetSystems } }
+            : {}),
       },
       orderBy: { createdAt: 'asc' },
       take: this.limit(params.limit, 25, 100),
@@ -191,5 +233,25 @@ export class AdminService {
   private offset(value: number | undefined): number {
     const parsed = Number(value);
     return Number.isInteger(parsed) && parsed > 0 ? parsed : 0;
+  }
+
+  private filteredProcessedLast5Minutes(allowedTargetSystems?: string[]) {
+    const snapshot = this.metrics.processedLast5Minutes();
+    if (!allowedTargetSystems) return snapshot;
+    const allowed = new Set(allowedTargetSystems);
+    const byTargetSystem = Object.fromEntries(
+      Object.entries(snapshot.byTargetSystem).filter(([targetSystem]) =>
+        allowed.has(targetSystem),
+      ),
+    );
+    const byStatus: Record<string, number> = {};
+    let total = 0;
+    for (const statuses of Object.values(byTargetSystem)) {
+      for (const [status, count] of Object.entries(statuses)) {
+        byStatus[status] = (byStatus[status] ?? 0) + count;
+        total += count;
+      }
+    }
+    return { total, byStatus, byTargetSystem };
   }
 }

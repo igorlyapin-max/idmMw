@@ -73,12 +73,50 @@ export interface AuthSession {
   authEnabled: boolean;
   authenticated: boolean;
   mode: string;
+  ssoProviders?: Array<'header' | 'oidc' | 'saml'>;
   csrfToken?: string;
   user?: {
     sub: string;
     name: string;
     provider: string;
+    groups?: string[];
   };
+}
+
+export interface ConnectorPermission {
+  connectorType: string;
+  canRead: boolean;
+  canWrite: boolean;
+}
+
+export interface EffectiveAdminPermissions {
+  superadmin: boolean;
+  provider: string;
+  groups: string[];
+  roles: Array<{ id: string; code: string; name: string }>;
+  permissions: ConnectorPermission[];
+}
+
+export interface AdminRole {
+  id: string;
+  code: string;
+  name: string;
+  description?: string | null;
+  system: boolean;
+  enabled: boolean;
+  permissions: ConnectorPermission[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AdminGroupRoleMapping {
+  id: string;
+  idpGroup: string;
+  roleId: string;
+  enabled: boolean;
+  role?: AdminRole;
+  createdAt: string;
+  updatedAt: string;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -125,9 +163,62 @@ export async function loginSso(): Promise<AuthSession> {
   return session;
 }
 
+export function oidcLoginUrl(): string {
+  return `${API_URL}/auth/oidc/login`;
+}
+
+export function samlLoginUrl(): string {
+  return `${API_URL}/auth/saml/login`;
+}
+
 export async function logout(): Promise<void> {
   await apiClient.post('/auth/logout');
   setCsrfToken('');
+}
+
+export async function fetchEffectiveAdminPermissions(): Promise<EffectiveAdminPermissions> {
+  const res = await apiClient.get('/admin/rbac/effective');
+  return res.data as EffectiveAdminPermissions;
+}
+
+export async function fetchAdminRoles(): Promise<AdminRole[]> {
+  const res = await apiClient.get('/admin/rbac/roles');
+  return res.data as AdminRole[];
+}
+
+export async function createAdminRole(data: {
+  code: string;
+  name: string;
+  description?: string;
+  enabled?: boolean;
+  permissions?: ConnectorPermission[];
+}): Promise<AdminRole> {
+  const res = await apiClient.post('/admin/rbac/roles', data);
+  return res.data as AdminRole;
+}
+
+export async function deleteAdminRole(id: string): Promise<void> {
+  await apiClient.delete(`/admin/rbac/roles/${id}`);
+}
+
+export async function fetchAdminGroupRoleMappings(): Promise<
+  AdminGroupRoleMapping[]
+> {
+  const res = await apiClient.get('/admin/rbac/mappings');
+  return res.data as AdminGroupRoleMapping[];
+}
+
+export async function createAdminGroupRoleMapping(data: {
+  idpGroup: string;
+  roleId: string;
+  enabled?: boolean;
+}): Promise<AdminGroupRoleMapping> {
+  const res = await apiClient.post('/admin/rbac/mappings', data);
+  return res.data as AdminGroupRoleMapping;
+}
+
+export async function deleteAdminGroupRoleMapping(id: string): Promise<void> {
+  await apiClient.delete(`/admin/rbac/mappings/${id}`);
 }
 
 export interface DlqItem {
@@ -249,6 +340,139 @@ export async function testTargetSystemConnection(id: string): Promise<{
 }> {
   const res = await apiClient.post(`/admin/target-systems/${id}/test`);
   return res.data as { success: boolean; message: string };
+}
+
+export interface LinuxCredentialProfile {
+  id: string;
+  targetSystemId: string;
+  name: string;
+  mode: 'env' | 'aapm';
+  username: string;
+  privateKeyRef?: string | null;
+  passwordRef?: string | null;
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface LinuxHost {
+  id: string;
+  targetSystemId: string;
+  name: string;
+  host: string;
+  port: number;
+  hostFingerprint: string;
+  credentialProfileId?: string | null;
+  credentialProfile?: LinuxCredentialProfile | null;
+  enabled: boolean;
+  metadata?: Record<string, unknown> | null;
+  groups?: LinuxServerGroup[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface LinuxServerGroup {
+  id: string;
+  targetSystemId: string;
+  code: string;
+  name: string;
+  description?: string | null;
+  enabled: boolean;
+  hostCount?: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export async function fetchLinuxCredentialProfiles(
+  targetSystemId: string,
+): Promise<LinuxCredentialProfile[]> {
+  const res = await apiClient.get(
+    `/admin/linux-fleet/target-systems/${targetSystemId}/credential-profiles`,
+    { params: { limit: 500 } },
+  );
+  return res.data as LinuxCredentialProfile[];
+}
+
+export async function createLinuxCredentialProfile(
+  targetSystemId: string,
+  data: {
+    name: string;
+    mode: 'env' | 'aapm';
+    username: string;
+    privateKeyRef?: string;
+    passwordRef?: string;
+    enabled?: boolean;
+  },
+): Promise<LinuxCredentialProfile> {
+  const res = await apiClient.post(
+    `/admin/linux-fleet/target-systems/${targetSystemId}/credential-profiles`,
+    data,
+  );
+  return res.data as LinuxCredentialProfile;
+}
+
+export async function fetchLinuxHosts(
+  targetSystemId: string,
+): Promise<LinuxHost[]> {
+  const res = await apiClient.get(
+    `/admin/linux-fleet/target-systems/${targetSystemId}/hosts`,
+    { params: { limit: 500 } },
+  );
+  return res.data as LinuxHost[];
+}
+
+export async function createLinuxHost(
+  targetSystemId: string,
+  data: {
+    name: string;
+    host: string;
+    port?: number;
+    hostFingerprint: string;
+    credentialProfileId?: string | null;
+    enabled?: boolean;
+  },
+): Promise<LinuxHost> {
+  const res = await apiClient.post(
+    `/admin/linux-fleet/target-systems/${targetSystemId}/hosts`,
+    data,
+  );
+  return res.data as LinuxHost;
+}
+
+export async function fetchLinuxServerGroups(
+  targetSystemId: string,
+): Promise<LinuxServerGroup[]> {
+  const res = await apiClient.get(
+    `/admin/linux-fleet/target-systems/${targetSystemId}/groups`,
+    { params: { limit: 500 } },
+  );
+  return res.data as LinuxServerGroup[];
+}
+
+export async function createLinuxServerGroup(
+  targetSystemId: string,
+  data: {
+    code: string;
+    name: string;
+    description?: string;
+    enabled?: boolean;
+  },
+): Promise<LinuxServerGroup> {
+  const res = await apiClient.post(
+    `/admin/linux-fleet/target-systems/${targetSystemId}/groups`,
+    data,
+  );
+  return res.data as LinuxServerGroup;
+}
+
+export async function setLinuxServerGroupHosts(
+  groupId: string,
+  hostIds: string[],
+): Promise<{ groupId: string; hostIds: string[] }> {
+  const res = await apiClient.put(`/admin/linux-fleet/groups/${groupId}/hosts`, {
+    hostIds,
+  });
+  return res.data as { groupId: string; hostIds: string[] };
 }
 
 export interface RuntimeDebugSession {

@@ -4,6 +4,10 @@ import { RuntimeDiagnosticsController } from './runtime-diagnostics.controller';
 import { AdminService } from './admin.service';
 import { TargetSystemController } from './target-system.controller';
 import { TargetSystemService } from './target-system.service';
+import { LinuxFleetController } from './linux-fleet.controller';
+import { LinuxFleetService } from './linux-fleet.service';
+import { RbacController } from './rbac.controller';
+import { AdminRbacService } from './admin-rbac.service';
 import { IdmController } from '../inbound/idm/idm.controller';
 import { CoreModule } from '../core/core.module';
 import { KafkaModule } from '../kafka/kafka.module';
@@ -16,8 +20,10 @@ import { ConnectorsModule } from '../connectors/connectors.module';
     AdminController,
     RuntimeDiagnosticsController,
     TargetSystemController,
+    LinuxFleetController,
+    RbacController,
     IdmController,
   ],
-  providers: [AdminService, TargetSystemService],
+  providers: [AdminService, TargetSystemService, LinuxFleetService, AdminRbacService],
 })
 export class AdminModule {}
