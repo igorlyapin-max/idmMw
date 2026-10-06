@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   Logger,
@@ -84,6 +85,7 @@ export class TargetSystemService {
 
   async create(dto: CreateTargetSystemDto) {
     try {
+      this.validateTargetSystemConfig(dto.type, dto.config);
       const item = await this.prisma.targetSystem.create({
         data: {
           name: dto.name,
@@ -102,12 +104,15 @@ export class TargetSystemService {
 
   async update(id: string, dto: UpdateTargetSystemDto) {
     try {
-      const current =
-        dto.config !== undefined
-          ? await this.prisma.targetSystem.findUnique({ where: { id } })
-          : null;
+      const needsCurrent = dto.config !== undefined || dto.type !== undefined;
+      const current = needsCurrent
+        ? await this.prisma.targetSystem.findUnique({ where: { id } })
+        : null;
+      if (needsCurrent && !current) {
+        throw new NotFoundException('TargetSystem not found');
+      }
       const currentConfig =
-        current && dto.config !== undefined
+        current && needsCurrent
           ? (this.jsonHelper.fromJson<Record<string, unknown>>(
               current.config,
             ) ?? {})
@@ -116,6 +121,12 @@ export class TargetSystemService {
         dto.config !== undefined
           ? mergeConfigPreservingSecrets(currentConfig, dto.config)
           : undefined;
+      if (needsCurrent && current) {
+        this.validateTargetSystemConfig(
+          dto.type ?? current.type,
+          nextConfig ?? currentConfig,
+        );
+      }
       const item = await this.prisma.targetSystem.update({
         where: { id },
         data: {
@@ -178,6 +189,59 @@ export class TargetSystemService {
       'code' in error &&
       (error as { code?: unknown }).code === code
     );
+  }
+
+  private validateTargetSystemConfig(
+    type: string,
+    config: Record<string, unknown>,
+  ): void {
+    if (type !== 'cmdbuild') {
+      return;
+    }
+
+    this.validateCmdbuildGroupMode(
+      config['defaultUserGroupMode'],
+      'defaultUserGroupMode',
+    );
+    this.validateCmdbuildGroupMode(
+      config['incomingGroupsMode'],
+      'incomingGroupsMode',
+    );
+
+    if (
+      this.booleanConfig(config['defaultUserGroupEnabled']) &&
+      !this.nonEmptyScalar(config['defaultUserGroupValue'])
+    ) {
+      throw new BadRequestException(
+        'CMDBuild defaultUserGroupValue is required when defaultUserGroupEnabled is true',
+      );
+    }
+  }
+
+  private validateCmdbuildGroupMode(value: unknown, fieldName: string): void {
+    if (value === undefined || value === null || value === '') {
+      return;
+    }
+    if (typeof value !== 'string' || !['id', 'name'].includes(value)) {
+      throw new BadRequestException(
+        `Invalid CMDBuild ${fieldName}: expected id or name`,
+      );
+    }
+  }
+
+  private booleanConfig(value: unknown): boolean {
+    return (
+      value === true ||
+      (typeof value === 'string' &&
+        ['true', '1', 'yes', 'on'].includes(value.trim().toLowerCase()))
+    );
+  }
+
+  private nonEmptyScalar(value: unknown): boolean {
+    if (typeof value === 'number') {
+      return Number.isFinite(value);
+    }
+    return typeof value === 'string' && value.trim().length > 0;
   }
 
   private toPublicTargetSystem<T extends { config: unknown }>(

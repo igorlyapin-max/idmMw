@@ -1,5 +1,9 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { ConflictException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 import { TargetSystemService } from './target-system.service';
 import { PrismaService } from '../database/prisma.service';
 import { JsonHelper } from '../database/json.helper';
@@ -120,6 +124,30 @@ describe('TargetSystemService', () => {
         }),
       ).rejects.toBeInstanceOf(ConflictException);
     });
+
+    it('should reject invalid CMDBuild group mode before create', async () => {
+      await expect(
+        service.create({
+          name: 'cmdb',
+          type: 'cmdbuild',
+          label: 'CMDB',
+          config: { baseUrl: 'http://c', incomingGroupsMode: 'ids' },
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(prisma.targetSystem.create).not.toHaveBeenCalled();
+    });
+
+    it('should require default CMDBuild group value when enabled', async () => {
+      await expect(
+        service.create({
+          name: 'cmdb',
+          type: 'cmdbuild',
+          label: 'CMDB',
+          config: { baseUrl: 'http://c', defaultUserGroupEnabled: true },
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(prisma.targetSystem.create).not.toHaveBeenCalled();
+    });
   });
 
   describe('update', () => {
@@ -230,6 +258,24 @@ describe('TargetSystemService', () => {
           serverName: 'new.example',
         },
       });
+    });
+
+    it('should reject invalid effective CMDBuild config before update', async () => {
+      prisma.targetSystem.findUnique.mockResolvedValue({
+        id: '1',
+        type: 'cmdbuild',
+        config: JSON.stringify({
+          baseUrl: 'http://c',
+          defaultUserGroupEnabled: true,
+        }),
+      });
+
+      await expect(
+        service.update('1', {
+          config: { incomingGroupsMode: 'roleName' },
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(prisma.targetSystem.update).not.toHaveBeenCalled();
     });
 
     it('should map duplicate names to conflict', async () => {

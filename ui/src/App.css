@@ -428,6 +428,21 @@ input[type='checkbox'] {
   text-transform: uppercase;
 }
 
+.nested-fieldset {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 10px;
+  border: 1px solid var(--color-border);
+}
+
+.nested-fieldset legend {
+  padding: 0 4px;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .checkbox-row {
   display: flex;
   align-items: center;

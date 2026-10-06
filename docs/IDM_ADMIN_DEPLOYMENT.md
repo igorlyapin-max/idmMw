@@ -137,10 +137,22 @@ curl -X POST http://localhost:3010/admin/target-systems \
 CMDBuild user create diagnostics:
 
 - `cmdbuild` использует REST v3 IAM endpoint `POST /users` для `user.create`.
-- Для роли пользователя передавайте CMDBuild field `userGroups:
-  [{"_id": <roleId>}]` или задайте `defaultUserGroupId` в `TargetSystem.config`.
-  Поле `groups` из generic IDM payload не мапится автоматически в
-  `userGroups`.
+- Для роли пользователя приоритет имеет CMDBuild field
+  `userGroups: [{"_id": <roleId>}]` во входящем payload.
+- Fallback-группа настраивается в `TargetSystem.config` через
+  `defaultUserGroupEnabled=true`, `defaultUserGroupMode=id|name` и
+  `defaultUserGroupValue=<roleId-or-roleName>`. Старое поле
+  `defaultUserGroupId` только читается как legacy-конфигурация и UI его больше
+  не пишет.
+- Generic IDM field `groups` мапится в CMDBuild `userGroups` только если
+  включено `incomingGroupsEnabled=true`; `incomingGroupsMode=id|name` задает,
+  считать элементы `groups` готовыми role `_id` или exact role `name`. Для
+  `name` idmMw выполняет lookup `GET /roles` и в `POST /users` отправляет
+  найденный `_id`. Само поле `groups` никогда не передается дальше в
+  CMDBuild `/users`: если маппинг выключен, оно удаляется из outbound payload.
+  Пустые значения `groups` игнорируются; если настроена fallback-группа, она
+  будет применена. Нестроковые и нечисловые элементы `groups` отклоняются
+  controlled error `Invalid CMDBuild groups value: expected string or number`.
 - Для отображаемого имени используйте `description`. Поля `firstName` и
   `lastName` передаются в CMDBuild как есть и не собираются idmMw в
   `description`.

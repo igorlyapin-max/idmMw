@@ -17,6 +17,7 @@ import { fixedLengthFingerprint } from '../../../security/constant-time';
 import { DiagnosticLoggerService } from '../../../diagnostics/diagnostic-logger.service';
 
 export type CmdbuildAuthMode = 'session' | 'basic';
+export type CmdbuildGroupMode = 'id' | 'name';
 
 export interface CmdbuildConfig {
   baseUrl: string;
@@ -24,6 +25,11 @@ export interface CmdbuildConfig {
   password: string;
   apiPath?: string;
   defaultUserGroupId?: string | number;
+  defaultUserGroupEnabled?: boolean | string;
+  defaultUserGroupMode?: string;
+  defaultUserGroupValue?: string | number;
+  incomingGroupsEnabled?: boolean | string;
+  incomingGroupsMode?: string;
   authMode?: CmdbuildAuthMode;
   diagnosticTargetSystem?: string;
   tls?: TlsConnectionConfig;
@@ -527,14 +533,19 @@ export class CmdbuildConnectorService implements Connector {
     const hints: string[] = [];
     const hasGroupsField = Array.isArray(requestBody['groups']);
     const hasUserGroups = Array.isArray(requestBody['userGroups']);
-    const hasDefaultUserGroupId = config.defaultUserGroupId !== undefined;
+    const defaultSettings = this.defaultGroupSettings(config);
+    const incomingSettings = this.incomingGroupSettings(config);
+    const hasDefaultUserGroupId =
+      defaultSettings.enabled && defaultSettings.value !== undefined;
     const hasFirstNameLastName =
       requestBody['firstName'] !== undefined ||
       requestBody['lastName'] !== undefined;
 
     if (hasGroupsField && !hasUserGroups) {
       hints.push(
-        'groups is not mapped to CMDBuild userGroups; use userGroups [{_id}] or TargetSystem defaultUserGroupId',
+        incomingSettings.enabled
+          ? 'groups mapping is enabled but userGroups was not produced; check incomingGroupsMode and role lookup'
+          : 'groups is not mapped to CMDBuild userGroups; enable incomingGroupsEnabled or use userGroups [{_id}]',
       );
     }
     if (!hasUserGroups && !hasDefaultUserGroupId) {
@@ -560,9 +571,14 @@ export class CmdbuildConnectorService implements Connector {
       hasDescription: requestBody['description'] !== undefined,
       hasUserGroups,
       userGroupIds: this.userGroupIds(requestBody['userGroups']),
+      resolvedUserGroupIds: this.userGroupIds(requestBody['userGroups']),
       hasGroupsField,
       hasFirstNameLastName,
       hasDefaultUserGroupId,
+      incomingGroupsEnabled: incomingSettings.enabled,
+      incomingGroupsMode: incomingSettings.mode,
+      defaultUserGroupEnabled: defaultSettings.enabled,
+      defaultUserGroupMode: defaultSettings.mode,
       hints,
     });
   }
@@ -660,24 +676,177 @@ export class CmdbuildConnectorService implements Connector {
     return this.call(config, 'PUT', path, { ...current, ...patch });
   }
 
-  private applyDefaultUserGroup(
+  private async applyCmdbuildUserGroups(
     config: CmdbuildConfig,
     data: Record<string, unknown>,
-  ): Record<string, unknown> {
-    if (
-      data['userGroups'] !== undefined ||
-      config.defaultUserGroupId === undefined
-    ) {
-      return data;
+  ): Promise<Record<string, unknown>> {
+    if (data['userGroups'] !== undefined) {
+      return this.withoutGenericGroups(data);
     }
 
+    const incomingSettings = this.incomingGroupSettings(config);
+    if (incomingSettings.enabled && Array.isArray(data['groups'])) {
+      const userGroups = await this.toCmdbuildUserGroups(
+        config,
+        incomingSettings.mode,
+        data['groups'],
+      );
+      if (userGroups.length > 0) {
+        return {
+          active: true,
+          service: false,
+          language: 'en',
+          ...this.withoutGenericGroups(data),
+          userGroups,
+        };
+      }
+    }
+
+    const defaultSettings = this.defaultGroupSettings(config);
+    if (!defaultSettings.enabled || defaultSettings.value === undefined) {
+      return this.withoutGenericGroups(data);
+    }
+
+    const userGroups = await this.toCmdbuildUserGroups(
+      config,
+      defaultSettings.mode,
+      [defaultSettings.value],
+    );
     return {
       active: true,
       service: false,
       language: 'en',
-      ...data,
-      userGroups: [{ _id: config.defaultUserGroupId }],
+      ...this.withoutGenericGroups(data),
+      userGroups,
     };
+  }
+
+  private withoutGenericGroups(
+    data: Record<string, unknown>,
+  ): Record<string, unknown> {
+    const rest = { ...data };
+    delete rest['groups'];
+    return rest;
+  }
+
+  private incomingGroupSettings(config: CmdbuildConfig): {
+    enabled: boolean;
+    mode: CmdbuildGroupMode;
+  } {
+    return {
+      enabled: this.booleanConfig(config.incomingGroupsEnabled),
+      mode: this.groupMode(config.incomingGroupsMode, 'incomingGroupsMode'),
+    };
+  }
+
+  private defaultGroupSettings(config: CmdbuildConfig): {
+    enabled: boolean;
+    mode: CmdbuildGroupMode;
+    value: string | number | undefined;
+  } {
+    const hasModernDefault =
+      config.defaultUserGroupEnabled !== undefined ||
+      config.defaultUserGroupMode !== undefined ||
+      config.defaultUserGroupValue !== undefined;
+    const legacyValue = config.defaultUserGroupId;
+    return {
+      enabled: hasModernDefault
+        ? this.booleanConfig(config.defaultUserGroupEnabled)
+        : legacyValue !== undefined,
+      mode: hasModernDefault
+        ? this.groupMode(config.defaultUserGroupMode, 'defaultUserGroupMode')
+        : 'id',
+      value:
+        config.defaultUserGroupValue !== undefined
+          ? config.defaultUserGroupValue
+          : legacyValue,
+    };
+  }
+
+  private booleanConfig(value: unknown): boolean {
+    return (
+      value === true ||
+      (typeof value === 'string' &&
+        ['true', '1', 'yes', 'on'].includes(value.trim().toLowerCase()))
+    );
+  }
+
+  private groupMode(value: unknown, fieldName: string): CmdbuildGroupMode {
+    if (value === undefined || value === null || value === '') {
+      return 'id';
+    }
+    if (typeof value !== 'string') {
+      throw new Error(`Invalid CMDBuild ${fieldName}: expected id or name`);
+    }
+    const normalized = value.trim().toLowerCase();
+    if (normalized === 'id' || normalized === 'name') {
+      return normalized;
+    }
+    throw new Error(`Invalid CMDBuild ${fieldName}: expected id or name`);
+  }
+
+  private async toCmdbuildUserGroups(
+    config: CmdbuildConfig,
+    mode: CmdbuildGroupMode,
+    values: unknown[],
+  ): Promise<Array<{ _id: string | number }>> {
+    const normalized = values
+      .map((value) => this.groupValue(value))
+      .filter((value): value is string | number => value !== undefined);
+
+    if (mode === 'id') {
+      return normalized.map((value) => ({ _id: value }));
+    }
+
+    const roleIds = await this.resolveRoleNames(config, normalized.map(String));
+    return roleIds.map((value) => ({ _id: value }));
+  }
+
+  private groupValue(value: unknown): string | number | undefined {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return value;
+    }
+    if (typeof value !== 'string') {
+      throw new Error(
+        'Invalid CMDBuild groups value: expected string or number',
+      );
+    }
+    const trimmed = value.trim();
+    return trimmed ? trimmed : undefined;
+  }
+
+  private async resolveRoleNames(
+    config: CmdbuildConfig,
+    names: string[],
+  ): Promise<Array<string | number>> {
+    if (names.length === 0) {
+      return [];
+    }
+    const uniqueNames = [...new Set(names)];
+    const response = (await this.call(
+      config,
+      'GET',
+      this.appendQuery('/roles', { limit: 500 }),
+    )) as { data?: Array<Record<string, unknown>> };
+    const rows = Array.isArray(response.data) ? response.data : [];
+    const byName = new Map<string, Record<string, unknown>>();
+    for (const row of rows) {
+      if (typeof row['name'] === 'string') {
+        byName.set(row['name'], row);
+      }
+    }
+
+    return uniqueNames.map((name) => {
+      const row = byName.get(name);
+      const id = row?.['_id'];
+      if (id === undefined || id === null || id === '') {
+        throw new Error(`CMDBuild role not found by name: ${name}`);
+      }
+      if (typeof id === 'string' || typeof id === 'number') {
+        return id;
+      }
+      throw new Error(`CMDBuild role not found by name: ${name}`);
+    });
   }
 
   private async updateUserRoleMembership(
@@ -769,7 +938,7 @@ export class CmdbuildConnectorService implements Connector {
           config,
           'POST',
           '/users',
-          this.applyDefaultUserGroup(config, data),
+          await this.applyCmdbuildUserGroups(config, data),
         );
 
       case 'user.update':

@@ -22,9 +22,10 @@ const page = await context.newPage();
 const api = context.request;
 const runId = Date.now();
 const cmdbSmokeName = `ui-smoke-cmdb-${runId}`;
+let cmdbTargetId;
 
 try {
-  await api.post(`${baseUrl}/admin/target-systems`, {
+  const cmdbCreateResponse = await api.post(`${baseUrl}/admin/target-systems`, {
     data: {
       name: cmdbSmokeName,
       type: 'cmdbuild',
@@ -36,6 +37,8 @@ try {
       enabled: true,
     },
   });
+  const cmdbCreate = await cmdbCreateResponse.json();
+  cmdbTargetId = cmdbCreate?.id;
   await api.post(`${baseUrl}/admin/target-systems`, {
     data: {
       name: 'ui-smoke-fake',
@@ -85,7 +88,14 @@ try {
 
   const cmdbRow = page.getByRole('row').filter({ hasText: cmdbSmokeName });
   await cmdbRow.getByRole('button', { name: 'Edit' }).click();
-  await page.locator('#config-defaultUserGroupId').fill('');
+  const defaultGroupEnabled = page.locator('#config-defaultUserGroupEnabled');
+  if (!(await defaultGroupEnabled.isChecked())) {
+    throw new Error(
+      'Legacy defaultUserGroupId was not migrated in the UI form',
+    );
+  }
+  await defaultGroupEnabled.uncheck();
+  await page.locator('#config-defaultUserGroupValue').fill('');
   await page.getByRole('button', { name: 'Update', exact: true }).click();
   await page.getByText('Updated successfully').waitFor();
 
@@ -98,6 +108,49 @@ try {
     Object.prototype.hasOwnProperty.call(cmdbRead.config, 'defaultUserGroupId')
   ) {
     throw new Error('Cleared defaultUserGroupId remained in target config');
+  }
+  if (
+    cmdbRead?.config &&
+    (Object.prototype.hasOwnProperty.call(
+      cmdbRead.config,
+      'defaultUserGroupEnabled',
+    ) ||
+      Object.prototype.hasOwnProperty.call(
+        cmdbRead.config,
+        'defaultUserGroupValue',
+      ))
+  ) {
+    throw new Error(
+      'Disabled default CMDBuild group remained in target config',
+    );
+  }
+  if (
+    cmdbRead?.config &&
+    Object.prototype.hasOwnProperty.call(
+      cmdbRead.config,
+      'defaultUserGroupMode',
+    )
+  ) {
+    throw new Error(
+      'Disabled default CMDBuild group mode remained in target config',
+    );
+  }
+
+  await cmdbRow.getByRole('button', { name: 'Edit' }).click();
+  await page.locator('#config-incomingGroupsEnabled').check();
+  await page.locator('#config-incomingGroupsMode').selectOption('name');
+  await page.getByRole('button', { name: 'Update', exact: true }).click();
+  await page.getByText('Updated successfully').waitFor();
+
+  const cmdbReadIncomingResponse = await api.get(
+    `${baseUrl}/admin/target-systems/name/${encodeURIComponent(cmdbSmokeName)}`,
+  );
+  const cmdbReadIncoming = await cmdbReadIncomingResponse.json();
+  if (
+    cmdbReadIncoming?.config?.incomingGroupsEnabled !== true ||
+    cmdbReadIncoming?.config?.incomingGroupsMode !== 'name'
+  ) {
+    throw new Error('Incoming CMDBuild group settings were not persisted');
   }
 
   const fakeRow = page.getByRole('row').filter({ hasText: 'ui-smoke-fake' });
@@ -124,5 +177,8 @@ try {
     throw new Error('Verbose warning is not visibly rendered');
   }
 } finally {
+  if (cmdbTargetId) {
+    await api.delete(`${baseUrl}/admin/target-systems/${cmdbTargetId}`);
+  }
   await browser.close();
 }

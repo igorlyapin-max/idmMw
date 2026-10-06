@@ -44,10 +44,16 @@ interface ConfigField {
   name: string;
   label: string;
   help?: string;
-  inputType?: 'password' | 'text' | 'json';
+  inputType?: 'password' | 'text' | 'json' | 'checkbox';
   placeholder?: string;
   defaultValue?: string;
   options?: Array<{ value: string; label: string }>;
+}
+
+interface ConfigFieldSection {
+  key: string;
+  legend?: string;
+  fields: ConfigField[];
 }
 
 interface BuildConfigResult {
@@ -192,9 +198,41 @@ const TYPE_FIELDS: Record<string, ConfigField[]> = {
       help: 'Defaults to session. Basic is intended for read-only stands that do not allow service sessions.',
     },
     {
-      name: 'defaultUserGroupId',
-      label: 'Default user group ID',
-      help: 'Optional role/group assigned when user.create has no userGroups.',
+      name: 'defaultUserGroupEnabled',
+      label: 'Использовать группу по умолчанию',
+      inputType: 'checkbox',
+      help: 'When enabled, user.create gets a fallback group if payload has no userGroups and incoming groups are absent.',
+    },
+    {
+      name: 'defaultUserGroupMode',
+      label: 'Default group value type',
+      defaultValue: 'id',
+      options: [
+        { value: 'id', label: 'ID' },
+        { value: 'name', label: 'Name' },
+      ],
+      help: 'ID is sent as userGroups [{_id}]. Name is resolved through /roles, then sent as _id.',
+    },
+    {
+      name: 'defaultUserGroupValue',
+      label: 'Default group value',
+      help: 'CMDBuild role ID or exact role name, depending on Default group value type.',
+    },
+    {
+      name: 'incomingGroupsEnabled',
+      label: 'Интерпретировать входящие groups',
+      inputType: 'checkbox',
+      help: 'When enabled, payload.data.groups is mapped to CMDBuild userGroups unless payload already has userGroups.',
+    },
+    {
+      name: 'incomingGroupsMode',
+      label: 'Incoming groups value type',
+      defaultValue: 'id',
+      options: [
+        { value: 'id', label: 'ID' },
+        { value: 'name', label: 'Name' },
+      ],
+      help: 'ID treats each groups item as _id. Name resolves each item through /roles before user.create.',
     },
   ],
   passwork: [
@@ -580,6 +618,17 @@ const TYPE_FIELDS: Record<string, ConfigField[]> = {
   ],
 };
 
+const CMDBUILD_DEFAULT_GROUP_FIELDS = new Set([
+  'defaultUserGroupEnabled',
+  'defaultUserGroupMode',
+  'defaultUserGroupValue',
+]);
+
+const CMDBUILD_INCOMING_GROUP_FIELDS = new Set([
+  'incomingGroupsEnabled',
+  'incomingGroupsMode',
+]);
+
 function newForm(type = 'zabbix'): TargetSystemForm {
   return {
     ...EMPTY_FORM,
@@ -638,6 +687,12 @@ function buildConfig(form: TargetSystemForm): BuildConfigResult {
     if (value === undefined || value === '') {
       return;
     }
+    if (field.inputType === 'checkbox') {
+      if (value === 'true') {
+        cfg[field.name] = true;
+      }
+      return;
+    }
     if (field.inputType === 'json') {
       try {
         cfg[field.name] = JSON.parse(value);
@@ -654,7 +709,60 @@ function buildConfig(form: TargetSystemForm): BuildConfigResult {
     cfg['retryPolicy'] = retryPolicy;
   }
 
+  if (form.type === 'cmdbuild') {
+    delete cfg['defaultUserGroupId'];
+    if (form.configValues['defaultUserGroupEnabled'] !== 'true') {
+      delete cfg['defaultUserGroupMode'];
+      delete cfg['defaultUserGroupValue'];
+    }
+    if (form.configValues['incomingGroupsEnabled'] !== 'true') {
+      delete cfg['incomingGroupsMode'];
+    }
+    if (
+      form.configValues['defaultUserGroupEnabled'] === 'true' &&
+      !form.configValues['defaultUserGroupValue']?.trim()
+    ) {
+      errors['defaultUserGroupValue'] =
+        'Default group value is required when default group is enabled';
+    }
+  }
+
   return { config: cfg, errors };
+}
+
+function configFieldSections(
+  type: string,
+  fields: ConfigField[],
+): ConfigFieldSection[] {
+  if (type !== 'cmdbuild') {
+    return [{ key: 'main', fields }];
+  }
+
+  const baseFields = fields.filter(
+    (field) =>
+      !CMDBUILD_DEFAULT_GROUP_FIELDS.has(field.name) &&
+      !CMDBUILD_INCOMING_GROUP_FIELDS.has(field.name),
+  );
+  const defaultGroupFields = fields.filter((field) =>
+    CMDBUILD_DEFAULT_GROUP_FIELDS.has(field.name),
+  );
+  const incomingGroupFields = fields.filter((field) =>
+    CMDBUILD_INCOMING_GROUP_FIELDS.has(field.name),
+  );
+
+  return [
+    { key: 'main', fields: baseFields },
+    {
+      key: 'cmdbuild-default-group',
+      legend: 'Default group',
+      fields: defaultGroupFields,
+    },
+    {
+      key: 'cmdbuild-incoming-groups',
+      legend: 'Incoming groups',
+      fields: incomingGroupFields,
+    },
+  ].filter((section) => section.fields.length > 0);
 }
 
 function retryPolicyFromConfig(
@@ -720,6 +828,33 @@ function formatExtraConfigValue(key: string, value: unknown): string {
   } catch {
     return String(value);
   }
+}
+
+function applyCmdbuildLegacyGroupConfig(
+  itemType: string,
+  rawConfig: Record<string, unknown>,
+  configValues: Record<string, string>,
+): Set<string> {
+  const consumed = new Set<string>();
+  if (itemType !== 'cmdbuild') {
+    return consumed;
+  }
+
+  const hasModernDefault =
+    rawConfig['defaultUserGroupEnabled'] !== undefined ||
+    rawConfig['defaultUserGroupMode'] !== undefined ||
+    rawConfig['defaultUserGroupValue'] !== undefined;
+  if (!hasModernDefault && rawConfig['defaultUserGroupId'] !== undefined) {
+    configValues['defaultUserGroupEnabled'] = 'true';
+    configValues['defaultUserGroupMode'] = 'id';
+    const legacyGroupId = rawConfig['defaultUserGroupId'];
+    configValues['defaultUserGroupValue'] =
+      typeof legacyGroupId === 'string' || typeof legacyGroupId === 'number'
+        ? String(legacyGroupId)
+        : '';
+  }
+  consumed.add('defaultUserGroupId');
+  return consumed;
 }
 
 const RUNTIME_LOG_DATE_FORMATTER = new Intl.DateTimeFormat('ru-RU', {
@@ -1203,9 +1338,14 @@ export function TargetSystemsPage({
     const fieldByName = new Map(
       (TYPE_FIELDS[item.type] ?? []).map((f) => [f.name, f]),
     );
+    const consumedConfigKeys = applyCmdbuildLegacyGroupConfig(
+      item.type,
+      rawConfig,
+      configValues,
+    );
 
     Object.entries(rawConfig).forEach(([key, value]) => {
-      if (key === 'retryPolicy') {
+      if (key === 'retryPolicy' || consumedConfigKeys.has(key)) {
         return;
       }
       if (fieldNames.has(key)) {
@@ -1215,9 +1355,13 @@ export function TargetSystemsPage({
         }
         const field = fieldByName.get(key);
         configValues[key] =
-          field?.inputType === 'json'
-            ? JSON.stringify(value, null, 2)
-            : String(value ?? '');
+          field?.inputType === 'checkbox'
+            ? value === true || value === 'true'
+              ? 'true'
+              : ''
+            : field?.inputType === 'json'
+              ? JSON.stringify(value, null, 2)
+              : String(value ?? '');
       } else {
         extraConfig[key] = value;
       }
@@ -1608,81 +1752,119 @@ export function TargetSystemsPage({
 
             <fieldset className="fieldset">
               <legend>Connector config</legend>
-              <div className="form-grid">
-                {currentFields.map((field) => {
-                  const error = configErrors[field.name];
-                  const fieldId = `config-${field.name}`;
-                  const errorId = `${fieldId}-error`;
-                  const descriptionId = `${fieldId}-help`;
-                  const describedBy = [
-                    field.help ? descriptionId : undefined,
-                    error ? errorId : undefined,
-                  ]
-                    .filter(Boolean)
-                    .join(' ');
-                  const commonProps = {
-                    id: fieldId,
-                    disabled: !!createReadonlyReason,
-                    'aria-invalid': error ? true : undefined,
-                    'aria-describedby': describedBy || undefined,
-                  };
-                  return (
-                    <label key={field.name} htmlFor={fieldId}>
-                      {field.label}
-                      {field.options ? (
-                        <select
-                          {...commonProps}
-                          value={
-                            form.configValues[field.name] ??
-                            field.defaultValue ??
-                            ''
-                          }
-                          onChange={(e) =>
-                            setConfigValue(field.name, e.target.value)
-                          }
-                        >
-                          {field.options.map((option) => (
-                            <option key={option.value} value={option.value}>
-                              {option.label}
-                            </option>
-                          ))}
-                        </select>
-                      ) : field.inputType === 'json' ? (
-                        <textarea
-                          {...commonProps}
-                          className="mono"
-                          rows={5}
-                          placeholder={field.placeholder}
-                          value={form.configValues[field.name] ?? ''}
-                          onChange={(e) =>
-                            setConfigValue(field.name, e.target.value)
-                          }
-                        />
-                      ) : (
-                        <input
-                          {...commonProps}
-                          type={field.inputType ?? 'text'}
-                          placeholder={field.placeholder}
-                          value={form.configValues[field.name] ?? ''}
-                          onChange={(e) =>
-                            setConfigValue(field.name, e.target.value)
-                          }
-                        />
-                      )}
-                      {field.help && (
-                        <span className="field-help" id={descriptionId}>
-                          {field.help}
-                        </span>
-                      )}
-                      {error && (
-                        <span className="error-text" id={errorId}>
-                          {error}
-                        </span>
-                      )}
-                    </label>
-                  );
-                })}
-              </div>
+              {configFieldSections(form.type, currentFields).map((section) => {
+                const body = (
+                  <div className="form-grid">
+                    {section.fields.map((field) => {
+                      const error = configErrors[field.name];
+                      const fieldId = `config-${field.name}`;
+                      const errorId = `${fieldId}-error`;
+                      const descriptionId = `${fieldId}-help`;
+                      const describedBy = [
+                        field.help ? descriptionId : undefined,
+                        error ? errorId : undefined,
+                      ]
+                        .filter(Boolean)
+                        .join(' ');
+                      const dependentDefaultGroupField =
+                        CMDBUILD_DEFAULT_GROUP_FIELDS.has(field.name) &&
+                        field.name !== 'defaultUserGroupEnabled';
+                      const dependentIncomingGroupsField =
+                        CMDBUILD_INCOMING_GROUP_FIELDS.has(field.name) &&
+                        field.name !== 'incomingGroupsEnabled';
+                      const fieldDisabled =
+                        !!createReadonlyReason ||
+                        (dependentDefaultGroupField &&
+                          form.configValues['defaultUserGroupEnabled'] !==
+                            'true') ||
+                        (dependentIncomingGroupsField &&
+                          form.configValues['incomingGroupsEnabled'] !==
+                            'true');
+                      const commonProps = {
+                        id: fieldId,
+                        disabled: fieldDisabled,
+                        'aria-invalid': error ? true : undefined,
+                        'aria-describedby': describedBy || undefined,
+                      };
+                      return (
+                        <label key={field.name} htmlFor={fieldId}>
+                          {field.label}
+                          {field.options ? (
+                            <select
+                              {...commonProps}
+                              value={
+                                form.configValues[field.name] ??
+                                field.defaultValue ??
+                                ''
+                              }
+                              onChange={(e) =>
+                                setConfigValue(field.name, e.target.value)
+                              }
+                            >
+                              {field.options.map((option) => (
+                                <option key={option.value} value={option.value}>
+                                  {option.label}
+                                </option>
+                              ))}
+                            </select>
+                          ) : field.inputType === 'checkbox' ? (
+                            <input
+                              {...commonProps}
+                              type="checkbox"
+                              checked={form.configValues[field.name] === 'true'}
+                              onChange={(e) =>
+                                setConfigValue(
+                                  field.name,
+                                  e.target.checked ? 'true' : '',
+                                )
+                              }
+                            />
+                          ) : field.inputType === 'json' ? (
+                            <textarea
+                              {...commonProps}
+                              className="mono"
+                              rows={5}
+                              placeholder={field.placeholder}
+                              value={form.configValues[field.name] ?? ''}
+                              onChange={(e) =>
+                                setConfigValue(field.name, e.target.value)
+                              }
+                            />
+                          ) : (
+                            <input
+                              {...commonProps}
+                              type={field.inputType ?? 'text'}
+                              placeholder={field.placeholder}
+                              value={form.configValues[field.name] ?? ''}
+                              onChange={(e) =>
+                                setConfigValue(field.name, e.target.value)
+                              }
+                            />
+                          )}
+                          {field.help && (
+                            <span className="field-help" id={descriptionId}>
+                              {field.help}
+                            </span>
+                          )}
+                          {error && (
+                            <span className="error-text" id={errorId}>
+                              {error}
+                            </span>
+                          )}
+                        </label>
+                      );
+                    })}
+                  </div>
+                );
+                return section.legend ? (
+                  <fieldset className="nested-fieldset" key={section.key}>
+                    <legend>{section.legend}</legend>
+                    {body}
+                  </fieldset>
+                ) : (
+                  <div key={section.key}>{body}</div>
+                );
+              })}
               {extraConfigEntries.length > 0 && (
                 <details className="config-details">
                   <summary>

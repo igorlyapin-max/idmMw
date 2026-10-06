@@ -368,12 +368,11 @@ describe('CmdbuildConnectorService', () => {
           hasEmail: true,
           hasDescription: false,
           hasUserGroups: false,
-          hasGroupsField: true,
+          hasGroupsField: false,
           hasFirstNameLastName: true,
           hasDefaultUserGroupId: false,
           // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
           hints: expect.arrayContaining([
-            expect.stringContaining('groups is not mapped'),
             expect.stringContaining('no CMDBuild user group provided'),
             expect.stringContaining('firstName/lastName'),
           ]),
@@ -391,7 +390,7 @@ describe('CmdbuildConnectorService', () => {
           requestSummary: {
             type: 'object',
             // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-            keys: expect.arrayContaining(['groups', 'username']),
+            keys: expect.arrayContaining(['username']),
           },
           responseSummary: {
             type: 'object',
@@ -403,6 +402,10 @@ describe('CmdbuildConnectorService', () => {
       expect(JSON.stringify(diagnostics.verbose.mock.calls)).not.toContain(
         'should-not-be-forwarded',
       );
+      const requestCalls = httpService.request.mock.calls as Array<
+        [{ data?: Record<string, unknown> }]
+      >;
+      expect(requestCalls[0]?.[0].data).not.toHaveProperty('groups');
     });
 
     it('should log default CMDBuild user group shape for user.create', async () => {
@@ -439,6 +442,339 @@ describe('CmdbuildConnectorService', () => {
           hints: [],
         }),
       );
+    });
+
+    it('should map incoming groups as CMDBuild role ids when enabled', async () => {
+      httpService.request.mockReturnValue(
+        of({ data: { data: { _id: 99 } }, status: 201 }),
+      );
+
+      const result = await service.execute({
+        operation: 'user.create',
+        targetSystem: 'CMDB',
+        payload: {
+          config: {
+            ...BASIC_CMDBUILD_CONFIG,
+            incomingGroupsEnabled: true,
+            incomingGroupsMode: 'id',
+          },
+          data: {
+            username: 'jdoe',
+            groups: ['14', 15],
+          },
+        },
+      });
+
+      expect(result.success).toBe(true);
+      expect(httpService.request).toHaveBeenCalledWith(
+        expect.objectContaining({
+          method: 'POST',
+          url: 'http://c/cmdbuild/services/rest/v3/users',
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+          data: expect.objectContaining({
+            username: 'jdoe',
+            userGroups: [{ _id: '14' }, { _id: 15 }],
+          }),
+        }),
+      );
+      const requestCalls = httpService.request.mock.calls as Array<
+        [{ data?: Record<string, unknown> }]
+      >;
+      const request = requestCalls[0]?.[0];
+      if (!request?.data) {
+        throw new Error('Expected CMDBuild request data');
+      }
+      expect(request.data).not.toHaveProperty('groups');
+    });
+
+    it('should not map incoming groups when mapping is disabled', async () => {
+      httpService.request.mockReturnValue(
+        of({ data: { data: { _id: 99 } }, status: 201 }),
+      );
+
+      const result = await service.execute({
+        operation: 'user.create',
+        targetSystem: 'CMDB',
+        payload: {
+          config: {
+            ...BASIC_CMDBUILD_CONFIG,
+            incomingGroupsEnabled: false,
+          },
+          data: {
+            username: 'jdoe',
+            groups: ['TestUserAdmin'],
+          },
+        },
+      });
+
+      expect(result.success).toBe(true);
+      expect(httpService.request).toHaveBeenCalledWith(
+        expect.objectContaining({
+          method: 'POST',
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+          data: expect.objectContaining({
+            username: 'jdoe',
+          }),
+        }),
+      );
+      const requestCalls = httpService.request.mock.calls as Array<
+        [{ data?: Record<string, unknown> }]
+      >;
+      const request = requestCalls[0]?.[0];
+      if (!request?.data) {
+        throw new Error('Expected CMDBuild request data');
+      }
+      expect(request.data).not.toHaveProperty('groups');
+    });
+
+    it('should not apply default group when disabled', async () => {
+      httpService.request.mockReturnValue(
+        of({ data: { data: { _id: 99 } }, status: 201 }),
+      );
+
+      const result = await service.execute({
+        operation: 'user.create',
+        targetSystem: 'CMDB',
+        payload: {
+          config: {
+            ...BASIC_CMDBUILD_CONFIG,
+            defaultUserGroupEnabled: false,
+            defaultUserGroupValue: '14',
+          },
+          data: { username: 'jdoe' },
+        },
+      });
+
+      expect(result.success).toBe(true);
+      expect(httpService.request).toHaveBeenCalledWith(
+        expect.objectContaining({
+          method: 'POST',
+          data: { username: 'jdoe' },
+        }),
+      );
+    });
+
+    it('should resolve incoming group names to CMDBuild role ids when enabled', async () => {
+      httpService.request
+        .mockReturnValueOnce(
+          of({
+            data: {
+              data: [
+                { _id: 14, name: 'TestUserAdmin' },
+                { _id: 16, name: 'Audit' },
+              ],
+            },
+            status: 200,
+          }),
+        )
+        .mockReturnValueOnce(of({ data: { data: { _id: 99 } }, status: 201 }));
+
+      const result = await service.execute({
+        operation: 'user.create',
+        targetSystem: 'CMDB',
+        payload: {
+          config: {
+            ...BASIC_CMDBUILD_CONFIG,
+            incomingGroupsEnabled: true,
+            incomingGroupsMode: 'name',
+          },
+          data: {
+            username: 'jdoe',
+            groups: ['TestUserAdmin'],
+          },
+        },
+      });
+
+      expect(result.success).toBe(true);
+      expect(httpService.request).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({
+          method: 'GET',
+          url: 'http://c/cmdbuild/services/rest/v3/roles?limit=500',
+        }),
+      );
+      expect(httpService.request).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          method: 'POST',
+          url: 'http://c/cmdbuild/services/rest/v3/users',
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+          data: expect.objectContaining({
+            userGroups: [{ _id: 14 }],
+          }),
+        }),
+      );
+    });
+
+    it('should resolve default group name to CMDBuild role id when enabled', async () => {
+      httpService.request
+        .mockReturnValueOnce(
+          of({
+            data: {
+              data: [{ _id: 14, name: 'TestUserAdmin' }],
+            },
+            status: 200,
+          }),
+        )
+        .mockReturnValueOnce(of({ data: { data: { _id: 99 } }, status: 201 }));
+
+      const result = await service.execute({
+        operation: 'user.create',
+        targetSystem: 'CMDB',
+        payload: {
+          config: {
+            ...BASIC_CMDBUILD_CONFIG,
+            defaultUserGroupEnabled: true,
+            defaultUserGroupMode: 'name',
+            defaultUserGroupValue: 'TestUserAdmin',
+          },
+          data: { username: 'jdoe' },
+        },
+      });
+
+      expect(result.success).toBe(true);
+      expect(httpService.request).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          method: 'POST',
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+          data: expect.objectContaining({
+            userGroups: [{ _id: 14 }],
+          }),
+        }),
+      );
+    });
+
+    it('should report a controlled error when CMDBuild role name is not found', async () => {
+      httpService.request.mockReturnValue(
+        of({ data: { data: [{ _id: 16, name: 'Audit' }] }, status: 200 }),
+      );
+
+      const result = await service.execute({
+        operation: 'user.create',
+        targetSystem: 'CMDB',
+        payload: {
+          config: {
+            ...BASIC_CMDBUILD_CONFIG,
+            incomingGroupsEnabled: true,
+            incomingGroupsMode: 'name',
+          },
+          data: {
+            username: 'jdoe',
+            groups: ['TestUserAdmin'],
+          },
+        },
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain(
+        'CMDBuild role not found by name: TestUserAdmin',
+      );
+      expect(httpService.request).toHaveBeenCalledTimes(1);
+    });
+
+    it('should use the default group when incoming groups are empty', async () => {
+      httpService.request.mockReturnValue(
+        of({ data: { data: { _id: 99 } }, status: 201 }),
+      );
+
+      const result = await service.execute({
+        operation: 'user.create',
+        targetSystem: 'CMDB',
+        payload: {
+          config: {
+            ...BASIC_CMDBUILD_CONFIG,
+            defaultUserGroupEnabled: true,
+            defaultUserGroupValue: '14',
+            incomingGroupsEnabled: true,
+            incomingGroupsMode: 'id',
+          },
+          data: {
+            username: 'jdoe',
+            groups: ['  '],
+          },
+        },
+      });
+
+      expect(result.success).toBe(true);
+      expect(httpService.request).toHaveBeenCalledWith(
+        expect.objectContaining({
+          method: 'POST',
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+          data: expect.objectContaining({
+            username: 'jdoe',
+            userGroups: [{ _id: '14' }],
+          }),
+        }),
+      );
+      const requestCalls = httpService.request.mock.calls as Array<
+        [{ data?: Record<string, unknown> }]
+      >;
+      expect(requestCalls[0]?.[0].data).not.toHaveProperty('groups');
+    });
+
+    it('should report a controlled error for invalid incoming group values', async () => {
+      const result = await service.execute({
+        operation: 'user.create',
+        targetSystem: 'CMDB',
+        payload: {
+          config: {
+            ...BASIC_CMDBUILD_CONFIG,
+            incomingGroupsEnabled: true,
+            incomingGroupsMode: 'id',
+          },
+          data: {
+            username: 'jdoe',
+            groups: [{ name: 'TestUserAdmin' }],
+          },
+        },
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain(
+        'Invalid CMDBuild groups value: expected string or number',
+      );
+      expect(httpService.request).not.toHaveBeenCalled();
+    });
+
+    it('should keep payload userGroups above incoming groups and defaults', async () => {
+      httpService.request.mockReturnValue(
+        of({ data: { data: { _id: 99 } }, status: 201 }),
+      );
+
+      const result = await service.execute({
+        operation: 'user.create',
+        targetSystem: 'CMDB',
+        payload: {
+          config: {
+            ...BASIC_CMDBUILD_CONFIG,
+            defaultUserGroupEnabled: true,
+            defaultUserGroupValue: '14',
+            incomingGroupsEnabled: true,
+            incomingGroupsMode: 'id',
+          },
+          data: {
+            username: 'jdoe',
+            groups: ['15'],
+            userGroups: [{ _id: 16 }],
+          },
+        },
+      });
+
+      expect(result.success).toBe(true);
+      expect(httpService.request).toHaveBeenCalledWith(
+        expect.objectContaining({
+          method: 'POST',
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+          data: expect.objectContaining({
+            userGroups: [{ _id: 16 }],
+          }),
+        }),
+      );
+      const requestCalls = httpService.request.mock.calls as Array<
+        [{ data?: Record<string, unknown> }]
+      >;
+      expect(requestCalls[0]?.[0].data).not.toHaveProperty('groups');
     });
 
     it('should not reuse cached CMDBuild session after credential rotation', async () => {
