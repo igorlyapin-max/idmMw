@@ -20,8 +20,22 @@ await context.grantPermissions(['clipboard-read', 'clipboard-write'], {
 });
 const page = await context.newPage();
 const api = context.request;
+const runId = Date.now();
+const cmdbSmokeName = `ui-smoke-cmdb-${runId}`;
 
 try {
+  await api.post(`${baseUrl}/admin/target-systems`, {
+    data: {
+      name: cmdbSmokeName,
+      type: 'cmdbuild',
+      label: 'UI smoke CMDBuild',
+      config: {
+        baseUrl: 'https://cmdbuild.example.local',
+        defaultUserGroupId: 'TestUserAdmin',
+      },
+      enabled: true,
+    },
+  });
   await api.post(`${baseUrl}/admin/target-systems`, {
     data: {
       name: 'ui-smoke-fake',
@@ -69,12 +83,31 @@ try {
   await page.getByLabel('Default permissions (JSON)').fill('[]');
   await page.getByText('Invalid JSON').waitFor({ state: 'detached' });
 
+  const cmdbRow = page.getByRole('row').filter({ hasText: cmdbSmokeName });
+  await cmdbRow.getByRole('button', { name: 'Edit' }).click();
+  await page.locator('#config-defaultUserGroupId').fill('');
+  await page.getByRole('button', { name: 'Update', exact: true }).click();
+  await page.getByText('Updated successfully').waitFor();
+
+  const cmdbReadResponse = await api.get(
+    `${baseUrl}/admin/target-systems/name/${encodeURIComponent(cmdbSmokeName)}`,
+  );
+  const cmdbRead = await cmdbReadResponse.json();
+  if (
+    cmdbRead?.config &&
+    Object.prototype.hasOwnProperty.call(cmdbRead.config, 'defaultUserGroupId')
+  ) {
+    throw new Error('Cleared defaultUserGroupId remained in target config');
+  }
+
   const fakeRow = page.getByRole('row').filter({ hasText: 'ui-smoke-fake' });
   await fakeRow.getByRole('button', { name: 'Logs' }).click();
   await page.getByRole('dialog', { name: /Logs: ui-smoke-fake/ }).waitFor();
   await page.getByRole('button', { name: 'Copy all' }).click();
   await page.getByText('Logs copied to clipboard.').waitFor();
-  const clipboardText = await page.evaluate(() => navigator.clipboard.readText());
+  const clipboardText = await page.evaluate(() =>
+    navigator.clipboard.readText(),
+  );
   if (!clipboardText.includes('idm.webhook.received')) {
     throw new Error('Copied logs do not include runtime log content');
   }

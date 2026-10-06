@@ -39,33 +39,33 @@ export function mergeConfigPreservingSecrets(
   current: Record<string, unknown>,
   incoming: Record<string, unknown>,
 ): Record<string, unknown> {
-  const merged: Record<string, unknown> = { ...current };
+  const merged: Record<string, unknown> = { ...incoming };
 
-  for (const [key, value] of Object.entries(incoming)) {
-    if (
-      isSecretKey(key) &&
-      isMaskedSecretValue(value) &&
-      Object.prototype.hasOwnProperty.call(current, key)
-    ) {
+  for (const [key, currentValue] of Object.entries(current)) {
+    const hasIncoming = Object.prototype.hasOwnProperty.call(incoming, key);
+    const incomingValue = incoming[key];
+
+    if (isSecretKey(key)) {
+      if (!hasIncoming || isMaskedSecretValue(incomingValue)) {
+        merged[key] = currentValue;
+      }
       continue;
     }
 
     if (
-      value !== null &&
-      typeof value === 'object' &&
-      !Array.isArray(value) &&
-      current[key] !== null &&
-      typeof current[key] === 'object' &&
-      !Array.isArray(current[key])
+      hasIncoming &&
+      incomingValue !== null &&
+      typeof incomingValue === 'object' &&
+      !Array.isArray(incomingValue) &&
+      currentValue !== null &&
+      typeof currentValue === 'object' &&
+      !Array.isArray(currentValue)
     ) {
       merged[key] = mergeConfigPreservingSecrets(
-        current[key] as Record<string, unknown>,
-        value as Record<string, unknown>,
+        currentValue as Record<string, unknown>,
+        incomingValue as Record<string, unknown>,
       );
-      continue;
     }
-
-    merged[key] = value;
   }
 
   return merged;

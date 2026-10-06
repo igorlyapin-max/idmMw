@@ -123,19 +123,20 @@ describe('TargetSystemService', () => {
   });
 
   describe('update', () => {
-    it('should serialize config when provided', async () => {
+    it('should replace non-secret config while preserving omitted secrets', async () => {
       prisma.targetSystem.findUnique.mockResolvedValue({
         id: '1',
         config: JSON.stringify({
+          defaultUserGroupId: 'TestUserAdmin',
           password: existingCredential,
-          url: 'http://old',
+          baseUrl: 'http://old',
         }),
       });
       prisma.targetSystem.update.mockResolvedValue({ id: '1' });
-      await service.update('1', { config: { url: 'http://z' } });
+      await service.update('1', { config: { baseUrl: 'http://new' } });
       expect(jsonHelper.toJson).toHaveBeenCalledWith({
+        baseUrl: 'http://new',
         password: existingCredential,
-        url: 'http://z',
       });
     });
 
@@ -176,6 +177,58 @@ describe('TargetSystemService', () => {
       expect(jsonHelper.toJson).toHaveBeenCalledWith({
         connectionString: 'Server=sql;User Id=sa;Password=Secret;',
         label: 'new',
+      });
+    });
+
+    it('should replace current secret when update sends explicit secret', async () => {
+      prisma.targetSystem.findUnique.mockResolvedValue({
+        id: '1',
+        config: JSON.stringify({
+          password: existingCredential,
+          url: 'http://old',
+        }),
+      });
+      prisma.targetSystem.update.mockResolvedValue({ id: '1' });
+
+      await service.update('1', {
+        config: { password: rotatedCredential, url: 'http://new' },
+      });
+
+      expect(jsonHelper.toJson).toHaveBeenCalledWith({
+        password: rotatedCredential,
+        url: 'http://new',
+      });
+    });
+
+    it('should recursively replace non-secret nested config while preserving omitted nested secrets', async () => {
+      prisma.targetSystem.findUnique.mockResolvedValue({
+        id: '1',
+        config: JSON.stringify({
+          tls: {
+            ca: existingCredential,
+            rejectUnauthorized: true,
+            serverName: 'old.example',
+          },
+          retryPolicy: {
+            maxRetries: 3,
+          },
+        }),
+      });
+      prisma.targetSystem.update.mockResolvedValue({ id: '1' });
+
+      await service.update('1', {
+        config: {
+          tls: {
+            serverName: 'new.example',
+          },
+        },
+      });
+
+      expect(jsonHelper.toJson).toHaveBeenCalledWith({
+        tls: {
+          ca: existingCredential,
+          serverName: 'new.example',
+        },
       });
     });
 
