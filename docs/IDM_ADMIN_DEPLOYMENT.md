@@ -134,6 +134,24 @@ curl -X POST http://localhost:3010/admin/target-systems \
 - После create/update/delete idmMw автоматически перезагружает registry;
   перезапуск приложения для изменения `TargetSystem.config` не нужен.
 
+CMDBuild user create diagnostics:
+
+- `cmdbuild` использует REST v3 IAM endpoint `POST /users` для `user.create`.
+- Для роли пользователя передавайте CMDBuild field `userGroups:
+  [{"_id": <roleId>}]` или задайте `defaultUserGroupId` в `TargetSystem.config`.
+  Поле `groups` из generic IDM payload не мапится автоматически в
+  `userGroups`.
+- Для отображаемого имени используйте `description`. Поля `firstName` и
+  `lastName` передаются в CMDBuild как есть и не собираются idmMw в
+  `description`.
+- При временном `Verbose` debug для `targetSystem=CMDB` логи содержат:
+  `cmdbuild.user.create.diagnostic` с shape payload (`hasPassword`,
+  `hasUserGroups`, `userGroupIds`, hints) и
+  `cmdbuild.request.failure.details` с safe `requestSummary`/`responseSummary`.
+  Это должно быть первым источником диагностики для `POST /users 500`; если
+  CMDBuild вернул пустой или generic response, смотрите серверный
+  `cmdbuild.log`.
+
 PostgreSQL roles example:
 
 ```bash

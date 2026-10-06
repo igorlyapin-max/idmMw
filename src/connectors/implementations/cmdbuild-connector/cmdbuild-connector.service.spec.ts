@@ -322,6 +322,125 @@ describe('CmdbuildConnectorService', () => {
       );
     });
 
+    it('should log CMDBuild user.create payload shape and response details in Verbose diagnostics', async () => {
+      const error = Object.assign(
+        new Error('Request failed with status code 500'),
+        {
+          name: 'AxiosError',
+          code: 'ERR_BAD_RESPONSE',
+          response: {
+            status: 500,
+            data: { success: false, messages: [{ message: 'generic error' }] },
+            headers: {
+              'content-type': 'application/json',
+              authorization: 'should-not-be-forwarded',
+            },
+          },
+        },
+      );
+      httpService.request.mockReturnValue(throwError(() => error));
+
+      const result = await service.execute({
+        operation: 'user.create',
+        targetSystem: 'CMDB',
+        payload: {
+          config: BASIC_CMDBUILD_CONFIG,
+          data: {
+            username: 'idm_test_002',
+            email: 'idm_test_002@example.local',
+            firstName: 'IDM',
+            lastName: 'Test',
+            groups: ['TestUserAdmin'],
+          },
+        },
+      });
+
+      expect(result.success).toBe(false);
+      expect(diagnostics.verbose).toHaveBeenCalledWith(
+        'cmdbuild.user.create.diagnostic',
+        expect.objectContaining({
+          targetSystem: 'CMDB',
+          method: 'POST',
+          path: '/users',
+          hasUsername: true,
+          usernameLength: 'idm_test_002'.length,
+          hasPassword: false,
+          hasEmail: true,
+          hasDescription: false,
+          hasUserGroups: false,
+          hasGroupsField: true,
+          hasFirstNameLastName: true,
+          hasDefaultUserGroupId: false,
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+          hints: expect.arrayContaining([
+            expect.stringContaining('groups is not mapped'),
+            expect.stringContaining('no CMDBuild user group provided'),
+            expect.stringContaining('firstName/lastName'),
+          ]),
+        }),
+      );
+      expect(diagnostics.verbose).toHaveBeenCalledWith(
+        'cmdbuild.request.failure.details',
+        expect.objectContaining({
+          targetSystem: 'CMDB',
+          method: 'POST',
+          path: '/users',
+          status: 500,
+          errorName: 'AxiosError',
+          errorCode: 'ERR_BAD_RESPONSE',
+          requestSummary: {
+            type: 'object',
+            // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+            keys: expect.arrayContaining(['groups', 'username']),
+          },
+          responseSummary: {
+            type: 'object',
+            keys: ['messages', 'success'],
+          },
+          responseContentType: 'application/json',
+        }),
+      );
+      expect(JSON.stringify(diagnostics.verbose.mock.calls)).not.toContain(
+        'should-not-be-forwarded',
+      );
+    });
+
+    it('should log default CMDBuild user group shape for user.create', async () => {
+      httpService.request.mockReturnValue(
+        of({ data: { data: { _id: 99 } }, status: 201 }),
+      );
+
+      const result = await service.execute({
+        operation: 'user.create',
+        targetSystem: 'CMDB',
+        payload: {
+          config: { ...BASIC_CMDBUILD_CONFIG, defaultUserGroupId: 14 },
+          data: { username: 'jdoe', description: 'John Doe' },
+        },
+      });
+
+      expect(result.success).toBe(true);
+      expect(diagnostics.verbose).toHaveBeenCalledWith(
+        'cmdbuild.request',
+        expect.objectContaining({
+          requestSummary: {
+            type: 'object',
+            // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+            keys: expect.arrayContaining(['userGroups', 'username']),
+          },
+        }),
+      );
+      expect(diagnostics.verbose).toHaveBeenCalledWith(
+        'cmdbuild.user.create.diagnostic',
+        expect.objectContaining({
+          hasUserGroups: true,
+          userGroupIds: [14],
+          hasDefaultUserGroupId: true,
+          hints: [],
+        }),
+      );
+    });
+
     it('should not reuse cached CMDBuild session after credential rotation', async () => {
       const rotatedCredential = ['rotated', 'credential'].join('-');
       httpService.request

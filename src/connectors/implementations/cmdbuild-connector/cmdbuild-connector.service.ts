@@ -322,6 +322,49 @@ export class CmdbuildConnectorService implements Connector {
       );
   }
 
+  private errorName(error: unknown): string | undefined {
+    if (error === null || typeof error !== 'object') {
+      return undefined;
+    }
+    const name = (error as { name?: unknown }).name;
+    return typeof name === 'string' && name.trim() ? name : undefined;
+  }
+
+  private errorCode(error: unknown): string | undefined {
+    if (error === null || typeof error !== 'object') {
+      return undefined;
+    }
+    const code = (error as { code?: unknown }).code;
+    if (typeof code === 'string' || typeof code === 'number') {
+      return String(code);
+    }
+    return undefined;
+  }
+
+  private errorResponseData(error: unknown): unknown {
+    if (error === null || typeof error !== 'object') {
+      return undefined;
+    }
+    return (error as { response?: { data?: unknown } }).response?.data;
+  }
+
+  private responseHeaderValue(error: unknown, key: string): unknown {
+    if (error === null || typeof error !== 'object') {
+      return undefined;
+    }
+    const headers = (error as { response?: { headers?: unknown } }).response
+      ?.headers;
+    if (
+      headers === null ||
+      typeof headers !== 'object' ||
+      Array.isArray(headers)
+    ) {
+      return undefined;
+    }
+    const source = headers as Record<string, unknown>;
+    return source[key];
+  }
+
   private appendQuery(path: string, query: Record<string, unknown>): string {
     const params = new URLSearchParams();
     for (const [key, value] of Object.entries(query)) {
@@ -390,7 +433,11 @@ export class CmdbuildConnectorService implements Connector {
         method,
         path: this.safePath(path),
         authMode,
+        ...(body !== undefined
+          ? { requestSummary: this.summarizeDiagnosticValue(body) }
+          : {}),
       });
+      this.logUserCreateDiagnostic(config, method, path, body);
       const authHeaders = await this.getAuthHeaders(config, authMode);
       const response = await lastValueFrom(
         this.httpService.request({
@@ -436,8 +483,121 @@ export class CmdbuildConnectorService implements Connector {
         status: this.errorStatus(error),
         message: this.safeErrorMessage(error, config),
       });
+      this.diagnostics.verbose('cmdbuild.request.failure.details', {
+        targetSystem,
+        baseUrlOrigin: this.safeOrigin(config.baseUrl),
+        apiPath,
+        method,
+        path: this.safePath(path),
+        authMode,
+        status: this.errorStatus(error),
+        message: this.safeErrorMessage(error, config),
+        errorName: this.errorName(error),
+        errorCode: this.errorCode(error),
+        retrySessionAuth,
+        ...(body !== undefined
+          ? { requestSummary: this.summarizeDiagnosticValue(body) }
+          : {}),
+        responseSummary: this.summarizeDiagnosticValue(
+          this.errorResponseData(error),
+        ),
+        responseContentType: this.responseHeaderValue(error, 'content-type'),
+        responseContentLength: this.responseHeaderValue(
+          error,
+          'content-length',
+        ),
+      });
       throw error;
     }
+  }
+
+  private logUserCreateDiagnostic(
+    config: CmdbuildConfig,
+    method: string,
+    path: string,
+    body: unknown,
+  ): void {
+    if (method !== 'POST' || this.safePath(path) !== '/users') {
+      return;
+    }
+    const requestBody =
+      body !== null && typeof body === 'object' && !Array.isArray(body)
+        ? (body as Record<string, unknown>)
+        : {};
+    const hints: string[] = [];
+    const hasGroupsField = Array.isArray(requestBody['groups']);
+    const hasUserGroups = Array.isArray(requestBody['userGroups']);
+    const hasDefaultUserGroupId = config.defaultUserGroupId !== undefined;
+    const hasFirstNameLastName =
+      requestBody['firstName'] !== undefined ||
+      requestBody['lastName'] !== undefined;
+
+    if (hasGroupsField && !hasUserGroups) {
+      hints.push(
+        'groups is not mapped to CMDBuild userGroups; use userGroups [{_id}] or TargetSystem defaultUserGroupId',
+      );
+    }
+    if (!hasUserGroups && !hasDefaultUserGroupId) {
+      hints.push('no CMDBuild user group provided');
+    }
+    if (hasFirstNameLastName) {
+      hints.push(
+        'firstName/lastName are passed as-is; use description for CMDBuild user display name',
+      );
+    }
+
+    this.diagnostics.verbose('cmdbuild.user.create.diagnostic', {
+      targetSystem: this.diagnosticTargetSystem(config),
+      method,
+      path: this.safePath(path),
+      hasUsername: requestBody['username'] !== undefined,
+      usernameLength:
+        typeof requestBody['username'] === 'string'
+          ? requestBody['username'].length
+          : undefined,
+      hasPassword: requestBody['password'] !== undefined,
+      hasEmail: requestBody['email'] !== undefined,
+      hasDescription: requestBody['description'] !== undefined,
+      hasUserGroups,
+      userGroupIds: this.userGroupIds(requestBody['userGroups']),
+      hasGroupsField,
+      hasFirstNameLastName,
+      hasDefaultUserGroupId,
+      hints,
+    });
+  }
+
+  private userGroupIds(value: unknown): unknown[] | undefined {
+    if (!Array.isArray(value)) {
+      return undefined;
+    }
+    return value.map((item) =>
+      item !== null && typeof item === 'object' && !Array.isArray(item)
+        ? (item as Record<string, unknown>)['_id']
+        : undefined,
+    );
+  }
+
+  private summarizeDiagnosticValue(value: unknown): unknown {
+    if (value === undefined) {
+      return undefined;
+    }
+    if (value === null) {
+      return { type: 'null' };
+    }
+    if (Array.isArray(value)) {
+      return { type: 'array', count: value.length };
+    }
+    if (typeof value === 'object') {
+      return {
+        type: 'object',
+        keys: Object.keys(value).sort(),
+      };
+    }
+    if (typeof value === 'string') {
+      return { type: 'string', length: value.length };
+    }
+    return { type: typeof value };
   }
 
   private diagnosticTargetSystem(config: CmdbuildConfig): string | undefined {

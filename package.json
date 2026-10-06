@@ -24,6 +24,8 @@
     "test:e2e": "jest --config ./test/jest-e2e.json",
     "test:e2e:sqlite": "bash scripts/test-e2e-sqlite.sh",
     "test:runtime-smoke": "bash scripts/test-runtime-smoke.sh",
+    "test:admin-ui-target-systems-smoke": "bash scripts/test-admin-ui-target-systems-smoke.sh",
+    "test:postgres-role-live": "bash scripts/test-postgres-role-live.sh",
     "test:ha-live": "bash scripts/test-ha-live.sh",
     "test:passwork-live": "bash scripts/test-passwork-live.sh",
     "test:all-target-systems-live": "bash scripts/test-all-target-systems-live.sh",

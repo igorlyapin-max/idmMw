@@ -499,6 +499,7 @@ export interface RuntimeLogEvent {
   path?: string;
   status?: number;
   responseTime?: number;
+  details?: Record<string, unknown>;
 }
 
 export async function fetchRuntimeDebugStatus(): Promise<{

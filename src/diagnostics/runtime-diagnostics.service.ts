@@ -91,7 +91,7 @@ export class RuntimeDiagnosticsService {
   private normalizeTtl(value: unknown): number {
     const parsed = typeof value === 'number' ? value : Number(value);
     if (!Number.isFinite(parsed)) return 300;
-    return Math.min(Math.max(Math.trunc(parsed), 60), 1800);
+    return Math.min(Math.max(Math.trunc(parsed), 60), 14400);
   }
 
   private normalizeTarget(value: unknown): string | undefined {

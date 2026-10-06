@@ -15,6 +15,7 @@ export interface BufferedLogEvent {
   path?: string;
   status?: number;
   responseTime?: number;
+  details?: Record<string, unknown>;
 }
 
 export interface LogQuery {
@@ -27,7 +28,51 @@ export interface LogClearQuery {
   targetSystem?: string;
 }
 
-const MAX_LOG_EVENTS = 2000;
+const MAX_LOG_EVENTS = 10000;
+const SUMMARY_KEYS = new Set([
+  'time',
+  'level',
+  'msg',
+  'event',
+  'diagnostic',
+  'diagnosticLevel',
+  'targetSystem',
+  'context',
+  'method',
+  'path',
+  'status',
+  'responseTime',
+  'req',
+  'res',
+  'err',
+]);
+const DETAIL_KEYS = new Set([
+  'apiPath',
+  'authMode',
+  'baseUrlOrigin',
+  'errorCode',
+  'errorName',
+  'eventId',
+  'hasDefaultUserGroupId',
+  'hasDescription',
+  'hasEmail',
+  'hasFirstNameLastName',
+  'hasGroupsField',
+  'hasPassword',
+  'hasUserGroups',
+  'hasUsername',
+  'hints',
+  'mode',
+  'operation',
+  'receivedAt',
+  'requestSummary',
+  'responseContentLength',
+  'responseContentType',
+  'responseSummary',
+  'retrySessionAuth',
+  'userGroupIds',
+  'usernameLength',
+]);
 const LEVEL_BY_NUMBER: Record<number, string> = {
   10: 'trace',
   20: 'debug',
@@ -105,13 +150,29 @@ class RuntimeLogBuffer {
       path: this.safePath(value['path']) ?? this.requestPath(value),
       status: this.statusValue(value['status']) ?? this.responseStatus(value),
       responseTime: this.numberValue(value['responseTime']),
+      details: this.details(value),
     };
   }
 
   private normalizeLimit(value: unknown): number {
     const parsed = typeof value === 'number' ? value : Number(value);
     if (!Number.isFinite(parsed)) return 200;
-    return Math.min(Math.max(Math.trunc(parsed), 1), 500);
+    return Math.min(Math.max(Math.trunc(parsed), 1), 2000);
+  }
+
+  private details(
+    value: Record<string, unknown>,
+  ): Record<string, unknown> | undefined {
+    if (value['diagnostic'] !== true) {
+      return undefined;
+    }
+    const details: Record<string, unknown> = {};
+    for (const [key, item] of Object.entries(value)) {
+      if (SUMMARY_KEYS.has(key)) continue;
+      if (!DETAIL_KEYS.has(key)) continue;
+      details[key] = item;
+    }
+    return Object.keys(details).length > 0 ? details : undefined;
   }
 
   private numberOrNow(value: unknown): number {

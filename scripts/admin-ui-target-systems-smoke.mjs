@@ -1,0 +1,95 @@
+import { existsSync } from 'node:fs';
+import { chromium } from '@playwright/test';
+
+const baseUrl = process.env.IDMMW_UI_SMOKE_BASE_URL;
+if (!baseUrl) {
+  throw new Error('IDMMW_UI_SMOKE_BASE_URL is required');
+}
+
+const chrome = '/usr/bin/google-chrome';
+const browser = await chromium.launch({
+  headless: true,
+  ...(existsSync(chrome) ? { executablePath: chrome } : {}),
+});
+
+const context = await browser.newContext({
+  viewport: { width: 1366, height: 900 },
+});
+await context.grantPermissions(['clipboard-read', 'clipboard-write'], {
+  origin: baseUrl,
+});
+const page = await context.newPage();
+const api = context.request;
+
+try {
+  await api.post(`${baseUrl}/admin/target-systems`, {
+    data: {
+      name: 'ui-smoke-fake',
+      type: 'fake',
+      label: 'UI smoke fake',
+      config: {},
+      enabled: true,
+    },
+  });
+  await api.post(`${baseUrl}/admin/runtime/debug`, {
+    data: {
+      targetSystem: 'ui-smoke-fake',
+      level: 'Verbose',
+      ttlSeconds: 300,
+    },
+  });
+  await api.post(`${baseUrl}/webhooks/avanpost`, {
+    data: {
+      eventId: `ui-smoke-${Date.now()}`,
+      operation: 'user.create',
+      targetSystem: 'ui-smoke-fake',
+      payload: {
+        data: {
+          username: 'ui-smoke-user',
+          password: 'ui-smoke-password',
+        },
+      },
+    },
+  });
+
+  await page.goto(`${baseUrl}/target-systems`);
+  await page.getByRole('heading', { name: 'Target Systems' }).waitFor();
+
+  await page.getByRole('button', { name: /Create target system/ }).click();
+  await page.locator('#target-system-type').selectOption('postgres-role');
+  await page.locator('#target-system-name').fill('ui-smoke-postgres');
+  await page.locator('#target-system-label').fill('UI smoke PostgreSQL');
+  await page.getByLabel('Default permissions (JSON)').fill('[{]');
+  await page.getByRole('button', { name: 'Create', exact: true }).click();
+  await page.getByText('Invalid JSON').waitFor();
+  const invalidBox = await page.getByText('Invalid JSON').boundingBox();
+  if (!invalidBox || invalidBox.width === 0 || invalidBox.height === 0) {
+    throw new Error('Invalid JSON error is not visibly rendered');
+  }
+  await page.getByLabel('Default permissions (JSON)').fill('[]');
+  await page.getByText('Invalid JSON').waitFor({ state: 'detached' });
+
+  const fakeRow = page.getByRole('row').filter({ hasText: 'ui-smoke-fake' });
+  await fakeRow.getByRole('button', { name: 'Logs' }).click();
+  await page.getByRole('dialog', { name: /Logs: ui-smoke-fake/ }).waitFor();
+  await page.getByRole('button', { name: 'Copy all' }).click();
+  await page.getByText('Logs copied to clipboard.').waitFor();
+  const clipboardText = await page.evaluate(() => navigator.clipboard.readText());
+  if (!clipboardText.includes('idm.webhook.received')) {
+    throw new Error('Copied logs do not include runtime log content');
+  }
+  await page.getByRole('button', { name: 'Close' }).click();
+
+  await fakeRow.getByRole('button', { name: /Debug/ }).click();
+  await page.getByRole('dialog', { name: /Debug: ui-smoke-fake/ }).waitFor();
+  await page.getByLabel('Level').selectOption('Verbose');
+  await page.getByLabel('Duration').selectOption('14400');
+  const warning = page.getByText(/Verbose debug can expose/);
+  await warning.waitFor();
+  const warningBox = await warning.boundingBox();
+  if (!warningBox || warningBox.width === 0 || warningBox.height === 0) {
+    throw new Error('Verbose warning is not visibly rendered');
+  }
+} finally {
+  await browser.close();
+}

@@ -282,14 +282,19 @@ injected by the platform and cannot be resolved through the same PAM resolver.
   It creates an in-memory debug session for the selected `TargetSystem.name`
   with `Basic` or `Verbose` level and a bounded TTL. The setting is
   process-local, does not modify `.env`, and is lost on container restart.
+  `Verbose` can be enabled for up to 4 hours for long customer-side incident
+  reproduction; keep the default short duration for routine checks.
 - The `Target Systems -> Logs` action shows the current process ring buffer for
   the selected target system. It is intended for incident triage and does not
   replace `docker compose logs`, `LOG_SINK=file`, a collector, syslog, Kafka log
   topic, ELK/OpenSearch route or another operational sink. The Admin API returns
-  only the safe log view (`id`, `time`, `level`, `msg`, `event`, `diagnostic`,
+  the safe log view (`id`, `time`, `level`, `msg`, `event`, `diagnostic`,
   `diagnosticLevel`, `targetSystem`, `context`, `method`, `path`, `status`,
-  `responseTime`); raw records, headers, query strings, payloads and configs are
-  not exposed through this endpoint.
+  `responseTime`, `details`). For diagnostic events, `details` contains only
+  allowlisted structured fields emitted by idmMw diagnostics, such as request
+  shape, connector hints and target response summaries. Raw pino request
+  records, headers, query strings, payloads, response bodies and configs are not
+  exposed through this endpoint.
 - `Verbose` debug from Admin UI follows the same redaction policy as
   `DebugLogging__Level=Verbose`: secrets, auth headers, cookies, passwords,
   tokens and private key material must not appear in UI log responses.
@@ -346,3 +351,11 @@ does not rebuild image-only services and is not release evidence.
 - `/webhooks/avanpost` and `/idm/*` reject unsigned requests when
   `INTEGRATION_AUTH_ENABLED=true`.
 - No real secrets are stored in committed env templates.
+
+Focused local acceptance commands for diagnostics and Target Systems changes:
+
+```bash
+npm run test:runtime-smoke
+npm run test:admin-ui-target-systems-smoke
+POSTGRES_ROLE_TEST_IMAGE=postgres:17-alpine npm run test:postgres-role-live
+```

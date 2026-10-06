@@ -20,7 +20,7 @@ describe('RuntimeDiagnosticsService', () => {
     expect(service.isEnabled('CMDB')).toBe(true);
     expect(service.level('CMDB')).toBe('Verbose');
     expect(Date.parse(session.expiresAt) - Date.parse(session.createdAt)).toBe(
-      1800 * 1000,
+      14400 * 1000,
     );
   });
 
@@ -129,7 +129,7 @@ describe('RuntimeDiagnosticsService', () => {
     });
 
     expect(malformedLimitLogs).toHaveLength(200);
-    expect(oversizedLimitLogs).toHaveLength(500);
+    expect(oversizedLimitLogs).toHaveLength(600);
     expect(oversizedLimitLogs[0]).not.toHaveProperty('raw');
     expect(oversizedLimitLogs[0]).toEqual(
       expect.objectContaining({
@@ -140,5 +140,44 @@ describe('RuntimeDiagnosticsService', () => {
     expect(JSON.stringify(oversizedLimitLogs)).not.toContain('plain-secret');
     expect(JSON.stringify(oversizedLimitLogs)).not.toContain('Bearer secret');
     expect(JSON.stringify(oversizedLimitLogs)).not.toContain('filter=user');
+  });
+
+  it('preserves only safe diagnostic details for runtime log inspection', () => {
+    const service = new RuntimeDiagnosticsService();
+    runtimeLogBuffer.append({
+      time: Date.now(),
+      level: 30,
+      diagnostic: true,
+      diagnosticLevel: 'Verbose',
+      event: 'cmdbuild.request.failure.details',
+      targetSystem: 'CMDB',
+      method: 'POST',
+      path: '/users',
+      status: 500,
+      eventId: 'event-1',
+      operation: 'user.create',
+      requestSummary: { type: 'object', keys: ['username'] },
+      responseSummary: { type: 'object', keys: ['message'] },
+      payload: { data: { username: 'idm_test_002' } },
+      config: { baseUrl: 'https://cmdbuild.example.local' },
+    });
+
+    expect(service.logs({ targetSystem: 'CMDB', limit: 10 })[0]).toEqual(
+      expect.objectContaining({
+        event: 'cmdbuild.request.failure.details',
+        details: {
+          eventId: 'event-1',
+          operation: 'user.create',
+          requestSummary: { type: 'object', keys: ['username'] },
+          responseSummary: { type: 'object', keys: ['message'] },
+        },
+      }),
+    );
+    expect(
+      JSON.stringify(service.logs({ targetSystem: 'CMDB', limit: 10 })),
+    ).not.toContain('payload');
+    expect(
+      JSON.stringify(service.logs({ targetSystem: 'CMDB', limit: 10 })),
+    ).not.toContain('config');
   });
 });

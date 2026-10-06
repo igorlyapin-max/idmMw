@@ -94,6 +94,38 @@ describe('DiagnosticLoggerService', () => {
     expect(debugSpy).not.toHaveBeenCalled();
   });
 
+  it('redacts nested secrets in request and response diagnostic details', () => {
+    const service = createService({
+      DebugLogging__Enabled: true,
+      DebugLogging__Level: 'Verbose',
+    });
+
+    service.verbose('cmdbuild.request.failure.details', {
+      requestBody: {
+        username: 'runtime-smoke',
+        password: payloadCredential,
+      },
+      responseBody: {
+        token: payloadToken,
+        message: 'generic error',
+      },
+    });
+
+    expect(logSpy).toHaveBeenCalledWith({
+      diagnostic: true,
+      diagnosticLevel: 'Verbose',
+      event: 'cmdbuild.request.failure.details',
+      requestBody: {
+        username: 'runtime-smoke',
+        password: '[REDACTED]',
+      },
+      responseBody: {
+        token: '[REDACTED]',
+        message: 'generic error',
+      },
+    });
+  });
+
   it('enables Verbose through runtime override for a target system', () => {
     const runtimeDiagnostics = new RuntimeDiagnosticsService();
     runtimeDiagnostics.enable({

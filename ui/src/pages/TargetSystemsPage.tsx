@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent, RefObject } from 'react';
 import {
   clearRuntimeLogs,
@@ -48,6 +48,11 @@ interface ConfigField {
   placeholder?: string;
   defaultValue?: string;
   options?: Array<{ value: string; label: string }>;
+}
+
+interface BuildConfigResult {
+  config: Record<string, unknown>;
+  errors: Record<string, string>;
 }
 
 interface RetryPolicyForm {
@@ -615,8 +620,9 @@ function buildRetryPolicy(
   return Object.keys(retryPolicy).length > 0 ? retryPolicy : undefined;
 }
 
-function buildConfig(form: TargetSystemForm): Record<string, unknown> {
+function buildConfig(form: TargetSystemForm): BuildConfigResult {
   const cfg: Record<string, unknown> = { ...form.extraConfig };
+  const errors: Record<string, string> = {};
   TYPE_FIELDS[form.type]?.forEach((field) => {
     const value = form.configValues[field.name];
     if (isSecretConfigKey(field.name) && isMaskedSecretPlaceholder(value)) {
@@ -636,7 +642,7 @@ function buildConfig(form: TargetSystemForm): Record<string, unknown> {
       try {
         cfg[field.name] = JSON.parse(value);
       } catch {
-        // Leave invalid JSON out rather than sending a broken payload template.
+        errors[field.name] = 'Invalid JSON';
       }
       return;
     }
@@ -648,7 +654,7 @@ function buildConfig(form: TargetSystemForm): Record<string, unknown> {
     cfg['retryPolicy'] = retryPolicy;
   }
 
-  return cfg;
+  return { config: cfg, errors };
 }
 
 function retryPolicyFromConfig(
@@ -683,7 +689,8 @@ function retryPolicyFromConfig(
   };
 }
 
-const SECRET_CONFIG_KEY_PATTERN = /(pass|token|secret|key|code|credential)/i;
+const SECRET_CONFIG_KEY_PATTERN =
+  /(connectionString|pass|token|secret|key|code|credential)/i;
 
 function isSecretConfigKey(key: string): boolean {
   return SECRET_CONFIG_KEY_PATTERN.test(key);
@@ -779,10 +786,28 @@ function formatRuntimeLogDetails(item: RuntimeLogEvent): string {
       path: item.path,
       status: item.status,
       responseTime: item.responseTime,
+      ...(item.details ? { details: item.details } : {}),
     },
     null,
     2,
   );
+}
+
+function formatRuntimeLogsForCopy(items: RuntimeLogEvent[]): string {
+  return items
+    .map((item) => {
+      const header = [
+        `[${formatRuntimeReceivedAt(item.receivedAt)}]`,
+        runtimeLogLevelName(item.level),
+        item.targetSystem,
+        runtimeLogTitle(item),
+        runtimeLogHttpSummary(item),
+      ]
+        .filter(Boolean)
+        .join(' ');
+      return `${header}\n${formatRuntimeLogDetails(item)}`;
+    })
+    .join('\n\n');
 }
 
 function RuntimeLogEntry({ item }: { item: RuntimeLogEvent }) {
@@ -837,15 +862,21 @@ export function TargetSystemsPage({
 }) {
   const permissionsReady =
     !authEnabled || (permissionsStatus === 'ready' && !!effectivePermissions);
-  const writableTypes =
-    !authEnabled || effectivePermissions?.superadmin
-      ? TYPE_OPTIONS
-      : permissionsReady
-        ? TYPE_OPTIONS.filter((type) =>
-            canWriteConnector(effectivePermissions, type, authEnabled),
-          )
-        : [];
-  const defaultWritableType = writableTypes[0] ?? 'zabbix';
+  const writableTypes = useMemo(
+    () =>
+      !authEnabled || effectivePermissions?.superadmin
+        ? TYPE_OPTIONS
+        : permissionsReady
+          ? TYPE_OPTIONS.filter((type) =>
+              canWriteConnector(effectivePermissions, type, authEnabled),
+            )
+          : [],
+    [authEnabled, effectivePermissions, permissionsReady],
+  );
+  const defaultWritableType = useMemo(
+    () => writableTypes[0] ?? 'zabbix',
+    [writableTypes],
+  );
   const [items, setItems] = useState<TargetSystem[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -863,6 +894,10 @@ export function TargetSystemsPage({
   const [logsLoading, setLogsLoading] = useState(false);
   const [logsClearing, setLogsClearing] = useState(false);
   const [logsAutoRefresh, setLogsAutoRefresh] = useState(false);
+  const [logsCopyState, setLogsCopyState] = useState<
+    'idle' | 'copied' | 'failed'
+  >('idle');
+  const [configErrors, setConfigErrors] = useState<Record<string, string>>({});
   const [debugTarget, setDebugTarget] = useState<TargetSystem | null>(null);
   const [debugSessions, setDebugSessions] = useState<RuntimeDebugSession[]>([]);
   const [debugLevel, setDebugLevel] = useState<'Basic' | 'Verbose'>('Basic');
@@ -985,6 +1020,7 @@ export function TargetSystemsPage({
         limit: 200,
       });
       if (logsRequestSeqRef.current === requestSeq) {
+        setLogsCopyState('idle');
         setLogs(items);
       }
     } catch (e: unknown) {
@@ -1006,6 +1042,7 @@ export function TargetSystemsPage({
     try {
       const result = await clearRuntimeLogs({ targetSystem: logsTarget.name });
       setLogs([]);
+      setLogsCopyState('idle');
       setMessage(
         `Cleared ${result.cleared} buffered logs for ${logsTarget.name}`,
       );
@@ -1015,6 +1052,18 @@ export function TargetSystemsPage({
       setLogsClearing(false);
     }
   }, [logsTarget]);
+
+  const copyLogs = useCallback(async () => {
+    if (logs.length === 0) return;
+    const text = formatRuntimeLogsForCopy(logs);
+    try {
+      await navigator.clipboard.writeText(text);
+      setLogsCopyState('copied');
+    } catch (e: unknown) {
+      setLogsCopyState('failed');
+      setMessage(`Error: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }, [logs]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -1059,17 +1108,6 @@ export function TargetSystemsPage({
   }, [debugSessions.length]);
 
   useEffect(() => {
-    if (
-      editing ||
-      writableTypes.length === 0 ||
-      writableTypes.includes(form.type)
-    ) {
-      return;
-    }
-    setForm(newForm(defaultWritableType));
-  }, [defaultWritableType, editing, form.type, writableTypes]);
-
-  useEffect(() => {
     if (!logsTarget) return;
     logsCloseRef.current?.focus();
   }, [logsTarget]);
@@ -1084,6 +1122,7 @@ export function TargetSystemsPage({
     setEditing(false);
     setFormExpanded(false);
     setMessage('');
+    setConfigErrors({});
   };
 
   const toggleFormExpanded = () => {
@@ -1095,14 +1134,20 @@ export function TargetSystemsPage({
       !writableTypes.includes(form.type)
     ) {
       setForm(newForm(defaultWritableType));
+      setConfigErrors({});
     }
     setFormExpanded(nextExpanded);
   };
 
   const handleSave = async () => {
+    const { config, errors } = buildConfig(form);
+    setConfigErrors(errors);
+    if (Object.keys(errors).length > 0) {
+      setMessage('Fix invalid connector config JSON before saving');
+      return;
+    }
     setSaving(true);
     try {
-      const config = buildConfig(form);
       if (editing && form.id) {
         await updateTargetSystem(form.id, {
           name: form.name,
@@ -1129,6 +1174,22 @@ export function TargetSystemsPage({
     } finally {
       setSaving(false);
     }
+  };
+
+  const setConfigValue = (fieldName: string, value: string) => {
+    setConfigErrors((current) => {
+      if (current[fieldName] === undefined) return current;
+      const next = { ...current };
+      delete next[fieldName];
+      return next;
+    });
+    setForm((current) => ({
+      ...current,
+      configValues: {
+        ...current.configValues,
+        [fieldName]: value,
+      },
+    }));
   };
 
   const handleEdit = (item: TargetSystem) => {
@@ -1175,6 +1236,7 @@ export function TargetSystemsPage({
     setEditing(true);
     setFormExpanded(true);
     setMessage('');
+    setConfigErrors({});
   };
 
   const handleDelete = async (id: string) => {
@@ -1329,6 +1391,7 @@ export function TargetSystemsPage({
   const closeLogs = useCallback(() => {
     setLogsTarget(null);
     setLogsAutoRefresh(false);
+    setLogsCopyState('idle');
     restoreModalFocus();
   }, [restoreModalFocus]);
 
@@ -1357,6 +1420,7 @@ export function TargetSystemsPage({
     setLogsTarget(item);
     setLogs([]);
     setLogsLevel('');
+    setLogsCopyState('idle');
   };
 
   const openDebug = async (item: TargetSystem) => {
@@ -1400,6 +1464,7 @@ export function TargetSystemsPage({
 
   const currentFields = TYPE_FIELDS[form.type] ?? [];
   const extraConfigEntries = Object.entries(form.extraConfig);
+  const configHasErrors = Object.keys(configErrors).length > 0;
   const canSaveCurrentForm = canWriteConnector(
     effectivePermissions,
     form.type,
@@ -1486,27 +1551,30 @@ export function TargetSystemsPage({
               <div className="error-text">{createReadonlyReason}</div>
             )}
             <div className="form-grid">
-              <label>
+              <label htmlFor="target-system-name">
                 Name
                 <input
+                  id="target-system-name"
                   value={form.name}
                   disabled={!!createReadonlyReason}
                   onChange={(e) => setForm({ ...form, name: e.target.value })}
                 />
               </label>
-              <label>
+              <label htmlFor="target-system-type">
                 Type
                 <select
+                  id="target-system-type"
                   value={form.type}
                   disabled={!!createReadonlyReason}
-                  onChange={(e) =>
+                  onChange={(e) => {
+                    setConfigErrors({});
                     setForm({
                       ...form,
                       type: e.target.value,
                       configValues: {},
                       extraConfig: {},
-                    })
-                  }
+                    });
+                  }}
                 >
                   {writableTypes.map((type) => (
                     <option key={type} value={type}>
@@ -1515,9 +1583,10 @@ export function TargetSystemsPage({
                   ))}
                 </select>
               </label>
-              <label>
+              <label htmlFor="target-system-label">
                 Label
                 <input
+                  id="target-system-label"
                   value={form.label}
                   disabled={!!createReadonlyReason}
                   onChange={(e) => setForm({ ...form, label: e.target.value })}
@@ -1525,6 +1594,7 @@ export function TargetSystemsPage({
               </label>
               <label className="checkbox-row">
                 <input
+                  id="target-system-enabled"
                   type="checkbox"
                   checked={form.enabled}
                   disabled={!!createReadonlyReason}
@@ -1539,72 +1609,79 @@ export function TargetSystemsPage({
             <fieldset className="fieldset">
               <legend>Connector config</legend>
               <div className="form-grid">
-                {currentFields.map((field) => (
-                  <label key={field.name}>
-                    {field.label}
-                    {field.options ? (
-                      <select
-                        disabled={!!createReadonlyReason}
-                        value={
-                          form.configValues[field.name] ??
-                          field.defaultValue ??
-                          ''
-                        }
-                        onChange={(e) =>
-                          setForm({
-                            ...form,
-                            configValues: {
-                              ...form.configValues,
-                              [field.name]: e.target.value,
-                            },
-                          })
-                        }
-                      >
-                        {field.options.map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </select>
-                    ) : field.inputType === 'json' ? (
-                      <textarea
-                        className="mono"
-                        rows={5}
-                        placeholder={field.placeholder}
-                        disabled={!!createReadonlyReason}
-                        value={form.configValues[field.name] ?? ''}
-                        onChange={(e) =>
-                          setForm({
-                            ...form,
-                            configValues: {
-                              ...form.configValues,
-                              [field.name]: e.target.value,
-                            },
-                          })
-                        }
-                      />
-                    ) : (
-                      <input
-                        type={field.inputType ?? 'text'}
-                        placeholder={field.placeholder}
-                        disabled={!!createReadonlyReason}
-                        value={form.configValues[field.name] ?? ''}
-                        onChange={(e) =>
-                          setForm({
-                            ...form,
-                            configValues: {
-                              ...form.configValues,
-                              [field.name]: e.target.value,
-                            },
-                          })
-                        }
-                      />
-                    )}
-                    {field.help && (
-                      <span className="field-help">{field.help}</span>
-                    )}
-                  </label>
-                ))}
+                {currentFields.map((field) => {
+                  const error = configErrors[field.name];
+                  const fieldId = `config-${field.name}`;
+                  const errorId = `${fieldId}-error`;
+                  const descriptionId = `${fieldId}-help`;
+                  const describedBy = [
+                    field.help ? descriptionId : undefined,
+                    error ? errorId : undefined,
+                  ]
+                    .filter(Boolean)
+                    .join(' ');
+                  const commonProps = {
+                    id: fieldId,
+                    disabled: !!createReadonlyReason,
+                    'aria-invalid': error ? true : undefined,
+                    'aria-describedby': describedBy || undefined,
+                  };
+                  return (
+                    <label key={field.name} htmlFor={fieldId}>
+                      {field.label}
+                      {field.options ? (
+                        <select
+                          {...commonProps}
+                          value={
+                            form.configValues[field.name] ??
+                            field.defaultValue ??
+                            ''
+                          }
+                          onChange={(e) =>
+                            setConfigValue(field.name, e.target.value)
+                          }
+                        >
+                          {field.options.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      ) : field.inputType === 'json' ? (
+                        <textarea
+                          {...commonProps}
+                          className="mono"
+                          rows={5}
+                          placeholder={field.placeholder}
+                          value={form.configValues[field.name] ?? ''}
+                          onChange={(e) =>
+                            setConfigValue(field.name, e.target.value)
+                          }
+                        />
+                      ) : (
+                        <input
+                          {...commonProps}
+                          type={field.inputType ?? 'text'}
+                          placeholder={field.placeholder}
+                          value={form.configValues[field.name] ?? ''}
+                          onChange={(e) =>
+                            setConfigValue(field.name, e.target.value)
+                          }
+                        />
+                      )}
+                      {field.help && (
+                        <span className="field-help" id={descriptionId}>
+                          {field.help}
+                        </span>
+                      )}
+                      {error && (
+                        <span className="error-text" id={errorId}>
+                          {error}
+                        </span>
+                      )}
+                    </label>
+                  );
+                })}
               </div>
               {extraConfigEntries.length > 0 && (
                 <details className="config-details">
@@ -1727,7 +1804,12 @@ export function TargetSystemsPage({
             <button
               className="button primary"
               onClick={handleSave}
-              disabled={saving || !!createReadonlyReason || !canSaveCurrentForm}
+              disabled={
+                saving ||
+                !!createReadonlyReason ||
+                !canSaveCurrentForm ||
+                configHasErrors
+              }
             >
               {saving ? 'Saving...' : editing ? 'Update' : 'Create'}
             </button>
@@ -2255,7 +2337,10 @@ export function TargetSystemsPage({
                 Level
                 <select
                   value={logsLevel}
-                  onChange={(e) => setLogsLevel(e.target.value)}
+                  onChange={(e) => {
+                    setLogsLevel(e.target.value);
+                    setLogsCopyState('idle');
+                  }}
                 >
                   <option value="">All</option>
                   <option value="debug">debug</option>
@@ -2280,6 +2365,17 @@ export function TargetSystemsPage({
                 {logsLoading ? 'Refreshing...' : 'Refresh'}
               </button>
               <button
+                className="button"
+                onClick={() => void copyLogs()}
+                disabled={logs.length === 0}
+              >
+                {logsCopyState === 'copied'
+                  ? 'Copied'
+                  : logsCopyState === 'failed'
+                    ? 'Copy failed'
+                    : 'Copy all'}
+              </button>
+              <button
                 className="button danger"
                 onClick={() => void clearLogs()}
                 disabled={logsClearing || logsLoading}
@@ -2287,6 +2383,17 @@ export function TargetSystemsPage({
                 {logsClearing ? 'Clearing...' : 'Clear'}
               </button>
             </div>
+            {logsCopyState === 'copied' && (
+              <div className="message" role="status">
+                Logs copied to clipboard.
+              </div>
+            )}
+            {logsCopyState === 'failed' && (
+              <div className="error-text" role="alert">
+                Could not copy logs. Select the visible log text and copy it
+                manually.
+              </div>
+            )}
             <div className="log-viewer" aria-live="polite">
               {logs.length === 0 ? (
                 <div className="empty-state">
@@ -2347,9 +2454,16 @@ export function TargetSystemsPage({
                   <option value={300}>5m</option>
                   <option value={900}>15m</option>
                   <option value={1800}>30m</option>
+                  <option value={14400}>4h</option>
                 </select>
               </label>
             </div>
+            {debugLevel === 'Verbose' && (
+              <div className="error-text" role="alert">
+                Verbose debug can expose detailed diagnostic summaries. Use it
+                only temporarily; 4h is intended for long incident reproduction.
+              </div>
+            )}
             <button
               className="button primary"
               onClick={() => void handleEnableDebug()}
