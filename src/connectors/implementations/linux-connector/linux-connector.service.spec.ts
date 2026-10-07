@@ -170,6 +170,35 @@ describe('LinuxConnectorService', () => {
     expect(sshCommands.join('\n')).not.toContain('secret-password');
   });
 
+  it('maps generic IDM groups to Linux POSIX groups when enabled', async () => {
+    await service.execute({
+      operation: 'user.create',
+      targetSystem: 'linux-prod',
+      payload: {
+        config: {
+          provider: 'ssh-sudo',
+          host: 'linux.local',
+          username: 'idm',
+          privateKey: 'key',
+          hostFingerprint: 'SHA256:test-fingerprint',
+          sudoMode: 'passwordless',
+          groupMappingEnabled: true,
+          groupMappingMode: 'name',
+          groupMappingTarget: 'posix',
+        },
+        data: {
+          login: 'ivanov',
+          password: 'secret-password',
+          groups: [{ name: 'ops' }],
+        },
+      },
+    });
+
+    expect(sshCommands[0]).toBe(
+      "sudo useradd -m -d '/home/ivanov' -s '/bin/bash' -G 'ops' 'ivanov'",
+    );
+  });
+
   it('allows Linux search and sync without a login', async () => {
     const result = await service.execute({
       operation: 'user.search',

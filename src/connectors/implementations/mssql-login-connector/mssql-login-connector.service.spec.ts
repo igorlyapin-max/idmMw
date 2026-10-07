@@ -102,6 +102,63 @@ describe('MssqlLoginConnectorService', () => {
     expect(close).toHaveBeenCalled();
   });
 
+  it('maps generic IDM groups to MSSQL database roles when enabled', async () => {
+    const result = await service.execute({
+      operation: 'user.create',
+      targetSystem: 'mssql-prod',
+      payload: {
+        config: {
+          connectionString: 'Server=sql;User Id=sa;Password=Secret;',
+          defaultDatabase: 'appdb',
+          groupMappingEnabled: true,
+          groupMappingMode: 'name',
+          defaultGroups: [{ name: 'app_reader' }],
+        },
+        data: {
+          login: 'ivanov',
+          password: 'secret-password',
+          groups: [{ name: 'app_writer' }],
+        },
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(query).toHaveBeenCalledWith(
+      'USE [appdb]; ALTER ROLE [app_reader] ADD MEMBER [ivanov]',
+    );
+    expect(query).toHaveBeenCalledWith(
+      'USE [appdb]; ALTER ROLE [app_writer] ADD MEMBER [ivanov]',
+    );
+  });
+
+  it('ignores default and incoming mapped groups when MSSQL group mapping is disabled', async () => {
+    const result = await service.execute({
+      operation: 'user.create',
+      targetSystem: 'mssql-prod',
+      payload: {
+        config: {
+          connectionString: 'Server=sql;User Id=sa;Password=Secret;',
+          defaultDatabase: 'appdb',
+          groupMappingEnabled: false,
+          defaultGroups: [{ name: 'app_reader' }],
+        },
+        data: {
+          login: 'ivanov',
+          password: 'secret-password',
+          groups: [{ name: 'app_writer' }],
+        },
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(query).not.toHaveBeenCalledWith(
+      'USE [appdb]; ALTER ROLE [app_reader] ADD MEMBER [ivanov]',
+    );
+    expect(query).not.toHaveBeenCalledWith(
+      'USE [appdb]; ALTER ROLE [app_writer] ADD MEMBER [ivanov]',
+    );
+  });
+
   it('maps delete to safe DISABLE by default', async () => {
     const result = await service.execute({
       operation: 'user.delete',

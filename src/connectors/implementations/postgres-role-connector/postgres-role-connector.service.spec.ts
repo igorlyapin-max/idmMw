@@ -102,6 +102,58 @@ describe('PostgresRoleConnectorService', () => {
     expect(poolEnd).toHaveBeenCalled();
   });
 
+  it('maps generic IDM groups to PostgreSQL grant roles when enabled', async () => {
+    const result = await service.execute({
+      operation: 'user.create',
+      targetSystem: 'pg-prod',
+      payload: {
+        config: {
+          connectionString: 'postgres://admin:secret@db/postgres',
+          managedRolePrefix: 'app_',
+          groupMappingEnabled: true,
+          groupMappingMode: 'name',
+          defaultGroups: [{ name: 'app_read' }],
+        },
+        data: {
+          login: 'ivanov',
+          password: 'secret-password',
+          groups: [{ name: 'app_write' }],
+        },
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(clientQuery).toHaveBeenCalledWith('GRANT "app_read" TO "ivanov"');
+    expect(clientQuery).toHaveBeenCalledWith('GRANT "app_write" TO "ivanov"');
+  });
+
+  it('ignores default and incoming mapped groups when PostgreSQL group mapping is disabled', async () => {
+    const result = await service.execute({
+      operation: 'user.create',
+      targetSystem: 'pg-prod',
+      payload: {
+        config: {
+          connectionString: 'postgres://admin:secret@db/postgres',
+          groupMappingEnabled: false,
+          defaultGroups: [{ name: 'app_read' }],
+        },
+        data: {
+          login: 'ivanov',
+          password: 'secret-password',
+          groups: [{ name: 'app_write' }],
+        },
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(clientQuery).not.toHaveBeenCalledWith(
+      'GRANT "app_read" TO "ivanov"',
+    );
+    expect(clientQuery).not.toHaveBeenCalledWith(
+      'GRANT "app_write" TO "ivanov"',
+    );
+  });
+
   it('updates a PostgreSQL role with payload roles and permissions only', async () => {
     const result = await service.execute({
       operation: 'user.update',

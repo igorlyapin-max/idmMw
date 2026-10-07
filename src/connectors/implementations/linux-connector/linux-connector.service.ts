@@ -18,11 +18,18 @@ import {
   TlsConnectionConfig,
   TlsOptionsFactory,
 } from '../../../security/tls-options.factory';
+import {
+  groupMappingSettings,
+  groupRefValues,
+  type GroupMappingConfig,
+} from '../../group-mapping.util';
 
 type LinuxProvider = 'ssh-sudo' | 'remote-agent' | 'ssh-sudo-fleet';
+type LinuxGroupMappingTarget = 'posix' | 'server';
 
-interface LinuxConnectorConfig {
+interface LinuxConnectorConfig extends GroupMappingConfig {
   provider?: LinuxProvider;
+  groupMappingTarget?: LinuxGroupMappingTarget;
   loginPrefix?: string;
   defaultShell?: string;
   defaultHomeBase?: string;
@@ -143,7 +150,7 @@ export class LinuxConnectorService implements Connector {
           ? await this.executeRemoteAgent(payload, config)
           : config.provider === 'ssh-sudo-fleet'
             ? await this.executeSshFleet(payload, config)
-          : await this.executeSsh(payload, config);
+            : await this.executeSsh(payload, config);
       this.logger.log(`Linux operation succeeded: ${payload.operation}`);
       return { success: true, data: result };
     } catch (error: unknown) {
@@ -272,7 +279,9 @@ export class LinuxConnectorService implements Connector {
     }
   }
 
-  private async enabledFleetHostCount(targetSystemName?: string): Promise<number> {
+  private async enabledFleetHostCount(
+    targetSystemName?: string,
+  ): Promise<number> {
     if (!targetSystemName) return 0;
     const targetSystem = await this.prisma.targetSystem.findUnique({
       where: { name: targetSystemName },
@@ -365,21 +374,31 @@ export class LinuxConnectorService implements Connector {
       results,
     };
     if (failed.length > 0) {
-      throw new Error(`Linux fleet operation failed: ${JSON.stringify(summary)}`);
+      throw new Error(
+        `Linux fleet operation failed: ${JSON.stringify(summary)}`,
+      );
     }
     return summary;
   }
 
   private async resolveFleetHosts(payload: ConnectorPayload) {
     const targetSystem = await this.fleetTargetSystem(payload.targetSystem);
+    const targetConfig = this.configRecord(targetSystem.config);
     const data = (payload.payload['data'] ?? {}) as LinuxUserData;
     const params = (payload.payload['params'] ?? {}) as Record<string, unknown>;
+    const mapping = groupMappingSettings(targetConfig);
+    const mappedServerGroups =
+      mapping.enabled &&
+      this.groupMappingTarget(targetConfig, 'server') === 'server'
+        ? groupRefValues(data.groups, mapping.mode, 'groups').map(String)
+        : [];
+    const legacyGroups = mapping.enabled ? [] : [data.groups, params['groups']];
     const groupCodes = this.stringArray(
       data.serverGroups,
-      data.groups,
       params['serverGroups'],
-      params['groups'],
       params['groupIds'],
+      ...legacyGroups,
+      mappedServerGroups,
     );
     if (groupCodes.length === 0) {
       throw new Error('Missing Linux serverGroups for fleet operation');
@@ -418,7 +437,7 @@ export class LinuxConnectorService implements Connector {
   private async fleetTargetSystem(targetSystemName: string) {
     const targetSystem = await this.prisma.targetSystem.findUnique({
       where: { name: targetSystemName },
-      select: { id: true, type: true },
+      select: { id: true, type: true, config: true },
     });
     if (!targetSystem || targetSystem.type !== 'linux') {
       throw new Error('Linux fleet target system not found');
@@ -445,7 +464,9 @@ export class LinuxConnectorService implements Connector {
   ): Promise<LinuxConnectorConfig> {
     const profile = host.credentialProfile;
     if (!profile?.enabled) {
-      throw new Error(`Linux host '${host.name}' has no enabled credential profile`);
+      throw new Error(
+        `Linux host '${host.name}' has no enabled credential profile`,
+      );
     }
     return {
       ...baseConfig,
@@ -473,7 +494,9 @@ export class LinuxConnectorService implements Connector {
       return resolved;
     }
     if (mode === 'aapm') {
-      const refId = value.replace(/^aapm:\/\//i, '').replace(/^secret:\/\//i, '');
+      const refId = value
+        .replace(/^aapm:\/\//i, '')
+        .replace(/^secret:\/\//i, '');
       return this.pamClient.getValue(refId);
     }
     throw new Error('Unsupported Linux credential mode');
@@ -890,7 +913,16 @@ export class LinuxConnectorService implements Connector {
   }
 
   private groups(config: LinuxConnectorConfig, data: LinuxUserData): string[] {
-    const payloadGroups = this.stringArray(data.posixGroups, data.groups);
+    const mapping = groupMappingSettings(config);
+    const mappedGroups =
+      mapping.enabled && this.groupMappingTarget(config, 'posix') === 'posix'
+        ? groupRefValues(data.groups, mapping.mode, 'groups').map(String)
+        : [];
+    const payloadGroups = this.stringArray(
+      data.posixGroups,
+      ...(mapping.enabled ? [] : [data.groups]),
+      mappedGroups,
+    );
     return [...(config.defaultGroups ?? []), ...payloadGroups]
       .filter(
         (group): group is string =>
@@ -924,6 +956,36 @@ export class LinuxConnectorService implements Connector {
       }
     }
     return [...new Set(result)];
+  }
+
+  private groupMappingTarget(
+    config: { groupMappingTarget?: unknown },
+    defaultTarget: LinuxGroupMappingTarget,
+  ): LinuxGroupMappingTarget {
+    const value = config.groupMappingTarget;
+    if (value === undefined || value === null || value === '') {
+      return defaultTarget;
+    }
+    if (value === 'posix' || value === 'server') {
+      return value;
+    }
+    throw new Error(
+      'Invalid Linux groupMappingTarget: expected posix or server',
+    );
+  }
+
+  private configRecord(value: unknown): LinuxConnectorConfig {
+    if (typeof value === 'string') {
+      try {
+        const parsed = JSON.parse(value) as unknown;
+        return this.configRecord(parsed);
+      } catch {
+        return {};
+      }
+    }
+    return typeof value === 'object' && value !== null && !Array.isArray(value)
+      ? value
+      : {};
   }
 
   private positiveInt(value: unknown, fallback: number): number {

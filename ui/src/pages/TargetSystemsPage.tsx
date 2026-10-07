@@ -125,6 +125,47 @@ const EMPTY_FORM: TargetSystemForm = {
 
 type PermissionsStatus = 'loading' | 'ready' | 'failed';
 
+const GROUP_MAPPING_FIELDS: ConfigField[] = [
+  {
+    name: 'groupMappingEnabled',
+    label: 'Enable group mapping',
+    inputType: 'checkbox',
+    help: 'When enabled, payload.data.groups is interpreted by this connector instead of being ignored.',
+  },
+  {
+    name: 'groupMappingMode',
+    label: 'Group value type',
+    defaultValue: 'name',
+    options: [
+      { value: 'id', label: 'ID' },
+      { value: 'name', label: 'Name' },
+      { value: 'code', label: 'Code' },
+    ],
+    help: 'Selects which value is read from object groups. String groups are used as-is.',
+  },
+  {
+    name: 'defaultGroups',
+    label: 'Default mapped groups (JSON)',
+    inputType: 'json',
+    placeholder: '["app_read"]',
+    help: 'Applied together with incoming groups when this connector supports default group mapping.',
+  },
+];
+
+const LINUX_GROUP_MAPPING_FIELDS: ConfigField[] = [
+  ...GROUP_MAPPING_FIELDS.filter((field) => field.name !== 'defaultGroups'),
+  {
+    name: 'groupMappingTarget',
+    label: 'Linux group mapping target',
+    defaultValue: 'posix',
+    options: [
+      { value: 'posix', label: 'POSIX groups' },
+      { value: 'server', label: 'Server groups' },
+    ],
+    help: 'POSIX maps groups to usermod/useradd -G. Server maps groups to idmMw fleet server groups.',
+  },
+];
+
 const TYPE_FIELDS: Record<string, ConfigField[]> = {
   zabbix: [
     {
@@ -199,7 +240,7 @@ const TYPE_FIELDS: Record<string, ConfigField[]> = {
     },
     {
       name: 'defaultUserGroupEnabled',
-      label: 'Использовать группу по умолчанию',
+      label: 'Use default group',
       inputType: 'checkbox',
       help: 'When enabled, user.create gets a fallback group if payload has no userGroups and incoming groups are absent.',
     },
@@ -220,7 +261,7 @@ const TYPE_FIELDS: Record<string, ConfigField[]> = {
     },
     {
       name: 'incomingGroupsEnabled',
-      label: 'Интерпретировать входящие groups',
+      label: 'Interpret incoming groups',
       inputType: 'checkbox',
       help: 'When enabled, payload.data.groups is mapped to CMDBuild userGroups unless payload already has userGroups.',
     },
@@ -265,6 +306,7 @@ const TYPE_FIELDS: Record<string, ConfigField[]> = {
       placeholder: 'raw',
       help: 'Passwork X-Response-Format header. Default is raw.',
     },
+    ...GROUP_MAPPING_FIELDS,
   ],
   'consultant-plus': [
     {
@@ -454,6 +496,7 @@ const TYPE_FIELDS: Record<string, ConfigField[]> = {
       placeholder: '["app_read"]',
       help: 'Roles granted to users during user.create.',
     },
+    ...GROUP_MAPPING_FIELDS,
     {
       name: 'defaultPermissions',
       label: 'Default permissions (JSON)',
@@ -525,6 +568,7 @@ const TYPE_FIELDS: Record<string, ConfigField[]> = {
       placeholder: '["db_datareader"]',
       help: 'Database roles granted to users during user.create.',
     },
+    ...GROUP_MAPPING_FIELDS,
     {
       name: 'defaultPermissions',
       label: 'Default permissions (JSON)',
@@ -599,6 +643,7 @@ const TYPE_FIELDS: Record<string, ConfigField[]> = {
       inputType: 'json',
       placeholder: '["users"]',
     },
+    ...LINUX_GROUP_MAPPING_FIELDS,
     {
       name: 'sudoMode',
       label: 'Sudo mode',
@@ -627,6 +672,20 @@ const CMDBUILD_DEFAULT_GROUP_FIELDS = new Set([
 const CMDBUILD_INCOMING_GROUP_FIELDS = new Set([
   'incomingGroupsEnabled',
   'incomingGroupsMode',
+]);
+
+const COMMON_GROUP_MAPPING_FIELDS = new Set([
+  'groupMappingEnabled',
+  'groupMappingMode',
+  'groupMappingTarget',
+  'defaultGroups',
+]);
+
+const COMMON_GROUP_MAPPING_TYPES = new Set([
+  'postgres-role',
+  'mssql-login',
+  'linux',
+  'passwork',
 ]);
 
 function newForm(type = 'zabbix'): TargetSystemForm {
@@ -711,6 +770,10 @@ function buildConfig(form: TargetSystemForm): BuildConfigResult {
 
   if (form.type === 'cmdbuild') {
     delete cfg['defaultUserGroupId'];
+    delete cfg['groupMappingEnabled'];
+    delete cfg['groupMappingMode'];
+    delete cfg['groupMappingTarget'];
+    delete cfg['defaultGroups'];
     if (form.configValues['defaultUserGroupEnabled'] !== 'true') {
       delete cfg['defaultUserGroupMode'];
       delete cfg['defaultUserGroupValue'];
@@ -727,6 +790,16 @@ function buildConfig(form: TargetSystemForm): BuildConfigResult {
     }
   }
 
+  if (COMMON_GROUP_MAPPING_TYPES.has(form.type)) {
+    if (form.configValues['groupMappingEnabled'] !== 'true') {
+      delete cfg['groupMappingMode'];
+      delete cfg['groupMappingTarget'];
+      if (form.type !== 'linux') {
+        delete cfg['defaultGroups'];
+      }
+    }
+  }
+
   return { config: cfg, errors };
 }
 
@@ -734,6 +807,26 @@ function configFieldSections(
   type: string,
   fields: ConfigField[],
 ): ConfigFieldSection[] {
+  if (COMMON_GROUP_MAPPING_TYPES.has(type)) {
+    const baseFields = fields.filter(
+      (field) =>
+        !COMMON_GROUP_MAPPING_FIELDS.has(field.name) ||
+        (type === 'linux' && field.name === 'defaultGroups'),
+    );
+    const mappingFields = fields.filter((field) =>
+      COMMON_GROUP_MAPPING_FIELDS.has(field.name) &&
+      !(type === 'linux' && field.name === 'defaultGroups'),
+    );
+    return [
+      { key: 'main', fields: baseFields },
+      {
+        key: 'common-group-mapping',
+        legend: 'Group mapping',
+        fields: mappingFields,
+      },
+    ].filter((section) => section.fields.length > 0);
+  }
+
   if (type !== 'cmdbuild') {
     return [{ key: 'main', fields }];
   }
@@ -1772,6 +1865,13 @@ export function TargetSystemsPage({
                       const dependentIncomingGroupsField =
                         CMDBUILD_INCOMING_GROUP_FIELDS.has(field.name) &&
                         field.name !== 'incomingGroupsEnabled';
+                      const dependentCommonGroupMappingField =
+                        COMMON_GROUP_MAPPING_FIELDS.has(field.name) &&
+                        field.name !== 'groupMappingEnabled' &&
+                        !(
+                          form.type === 'linux' &&
+                          field.name === 'defaultGroups'
+                        );
                       const fieldDisabled =
                         !!createReadonlyReason ||
                         (dependentDefaultGroupField &&
@@ -1779,7 +1879,9 @@ export function TargetSystemsPage({
                             'true') ||
                         (dependentIncomingGroupsField &&
                           form.configValues['incomingGroupsEnabled'] !==
-                            'true');
+                            'true') ||
+                        (dependentCommonGroupMappingField &&
+                          form.configValues['groupMappingEnabled'] !== 'true');
                       const commonProps = {
                         id: fieldId,
                         disabled: fieldDisabled,

@@ -732,7 +732,31 @@ describe('CmdbuildConnectorService', () => {
 
       expect(result.success).toBe(false);
       expect(result.error).toContain(
-        'Invalid CMDBuild groups value: expected string or number',
+        'Invalid groups.id: expected string or number',
+      );
+      expect(httpService.request).not.toHaveBeenCalled();
+    });
+
+    it('should reject unsupported CMDBuild code group mode before outbound calls', async () => {
+      const result = await service.execute({
+        operation: 'user.create',
+        targetSystem: 'CMDB',
+        payload: {
+          config: {
+            ...BASIC_CMDBUILD_CONFIG,
+            incomingGroupsEnabled: true,
+            incomingGroupsMode: 'code',
+          },
+          data: {
+            username: 'jdoe',
+            groups: [{ code: 'TestUserAdmin' }],
+          },
+        },
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain(
+        'Invalid CMDBuild incomingGroupsMode: expected id or name',
       );
       expect(httpService.request).not.toHaveBeenCalled();
     });

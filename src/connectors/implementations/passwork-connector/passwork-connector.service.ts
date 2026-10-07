@@ -18,11 +18,17 @@ import {
   TlsConnectionConfig,
   TlsOptionsFactory,
 } from '../../../security/tls-options.factory';
+import {
+  groupMappingSettings,
+  groupRefValues,
+  type GroupMappingConfig,
+} from '../../group-mapping.util';
 
-export interface PassworkConfig {
+export interface PassworkConfig extends GroupMappingConfig {
   baseUrl: string;
   accessToken?: string;
   apiToken?: string;
+  defaultGroups?: unknown[];
   masterKeyHash?: string;
   timeout?: number;
   responseFormat?: 'raw' | 'base64';
@@ -159,8 +165,23 @@ export class PassworkConnectorService implements Connector {
         string,
         unknown
       >;
-      const request = this.buildRequest(payload.operation, data, params);
+      const requestData = this.isUserWriteOperation(payload.operation)
+        ? this.withoutGenericGroups(data)
+        : data;
+      const request = this.buildRequest(payload.operation, requestData, params);
+      const mappedUserGroupIds =
+        payload.operation === 'user.create'
+          ? await this.resolveUserGroupMapping(config, data)
+          : [];
       const response = await this.call(config, request);
+      if (payload.operation === 'user.create') {
+        await this.applyUserGroupMapping(
+          config,
+          data,
+          response,
+          mappedUserGroupIds,
+        );
+      }
       this.logger.log(`Passwork ${payload.operation} succeeded`);
       return { success: true, data: response };
     } catch (error: unknown) {
@@ -377,6 +398,124 @@ export class PassworkConnectorService implements Connector {
       default:
         throw new Error(`Unsupported Passwork operation: ${operation}`);
     }
+  }
+
+  private async resolveUserGroupMapping(
+    config: PassworkConfig,
+    data: Record<string, unknown>,
+  ): Promise<string[]> {
+    const mapping = groupMappingSettings(config);
+    const defaults =
+      mapping.enabled && config.defaultGroups !== undefined
+        ? groupRefValues(config.defaultGroups, mapping.mode, 'defaultGroups')
+        : [];
+    const incoming = mapping.enabled
+      ? groupRefValues(data['groups'], mapping.mode, 'groups')
+      : [];
+    const groupRefs = [...defaults, ...incoming];
+    if (groupRefs.length === 0) {
+      return [];
+    }
+
+    return mapping.mode === 'id'
+      ? groupRefs.map(String)
+      : this.resolveGroupIds(config, groupRefs.map(String), mapping.mode);
+  }
+
+  private async applyUserGroupMapping(
+    config: PassworkConfig,
+    data: Record<string, unknown>,
+    response: unknown,
+    groupIds: string[],
+  ): Promise<void> {
+    if (groupIds.length === 0) {
+      return;
+    }
+
+    const userId =
+      this.responseId(response) ?? this.toOptionalString(data['id']);
+    if (!userId) {
+      throw new Error(
+        'Passwork user.create did not return user id for group mapping',
+      );
+    }
+    for (const groupId of groupIds) {
+      await this.call(config, {
+        method: 'POST',
+        path: `/user-groups/${this.requireId(groupId)}/add-users`,
+        body: { userIds: [userId] },
+      });
+    }
+  }
+
+  private async resolveGroupIds(
+    config: PassworkConfig,
+    values: string[],
+    key: 'name' | 'code',
+  ): Promise<string[]> {
+    const uniqueValues = [...new Set(values)];
+    if (uniqueValues.length === 0) {
+      return [];
+    }
+    const response = await this.call(config, {
+      method: 'GET',
+      path: this.appendQuery('/user-groups', { limit: 500 }),
+    });
+    const groups = this.collectionItems(response);
+    return uniqueValues.map((value) => {
+      const row = groups.find((item) => {
+        const record = item as Record<string, unknown>;
+        return this.toOptionalString(record[key]) === value;
+      }) as Record<string, unknown> | undefined;
+      const id = this.toOptionalString(row?.['id']);
+      if (!id) {
+        throw new Error(`Passwork user group not found by ${key}: ${value}`);
+      }
+      return id;
+    });
+  }
+
+  private collectionItems(response: unknown): unknown[] {
+    if (Array.isArray(response)) {
+      return response;
+    }
+    if (typeof response !== 'object' || response === null) {
+      return [];
+    }
+    const record = response as Record<string, unknown>;
+    for (const key of ['groups', 'data', 'items', 'rows']) {
+      if (Array.isArray(record[key])) {
+        return record[key];
+      }
+    }
+    return [];
+  }
+
+  private responseId(response: unknown): string | undefined {
+    if (typeof response !== 'object' || response === null) {
+      return undefined;
+    }
+    const record = response as Record<string, unknown>;
+    return (
+      this.toOptionalString(record['id']) ??
+      (typeof record['data'] === 'object' && record['data'] !== null
+        ? this.toOptionalString(
+            (record['data'] as Record<string, unknown>)['id'],
+          )
+        : undefined)
+    );
+  }
+
+  private withoutGenericGroups(
+    data: Record<string, unknown>,
+  ): Record<string, unknown> {
+    const result = { ...data };
+    delete result['groups'];
+    return result;
+  }
+
+  private isUserWriteOperation(operation: string): boolean {
+    return operation === 'user.create' || operation === 'user.update';
   }
 
   private async call(

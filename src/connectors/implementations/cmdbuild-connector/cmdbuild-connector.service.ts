@@ -15,6 +15,7 @@ import {
 import { SECRET_REDACTION_CENSOR } from '../../../security/secret-redaction';
 import { fixedLengthFingerprint } from '../../../security/constant-time';
 import { DiagnosticLoggerService } from '../../../diagnostics/diagnostic-logger.service';
+import { booleanConfig, groupRefValues } from '../../group-mapping.util';
 
 export type CmdbuildAuthMode = 'session' | 'basic';
 export type CmdbuildGroupMode = 'id' | 'name';
@@ -24,6 +25,9 @@ export interface CmdbuildConfig {
   username: string;
   password: string;
   apiPath?: string;
+  groupMappingEnabled?: boolean | string;
+  groupMappingMode?: string;
+  defaultGroups?: unknown[];
   defaultUserGroupId?: string | number;
   defaultUserGroupEnabled?: boolean | string;
   defaultUserGroupMode?: string;
@@ -703,14 +707,14 @@ export class CmdbuildConnectorService implements Connector {
     }
 
     const defaultSettings = this.defaultGroupSettings(config);
-    if (!defaultSettings.enabled || defaultSettings.value === undefined) {
+    if (!defaultSettings.enabled || defaultSettings.values.length === 0) {
       return this.withoutGenericGroups(data);
     }
 
     const userGroups = await this.toCmdbuildUserGroups(
       config,
       defaultSettings.mode,
-      [defaultSettings.value],
+      defaultSettings.values,
     );
     return {
       active: true,
@@ -734,7 +738,7 @@ export class CmdbuildConnectorService implements Connector {
     mode: CmdbuildGroupMode;
   } {
     return {
-      enabled: this.booleanConfig(config.incomingGroupsEnabled),
+      enabled: booleanConfig(config.incomingGroupsEnabled),
       mode: this.groupMode(config.incomingGroupsMode, 'incomingGroupsMode'),
     };
   }
@@ -743,15 +747,22 @@ export class CmdbuildConnectorService implements Connector {
     enabled: boolean;
     mode: CmdbuildGroupMode;
     value: string | number | undefined;
+    values: unknown[];
   } {
     const hasModernDefault =
       config.defaultUserGroupEnabled !== undefined ||
       config.defaultUserGroupMode !== undefined ||
       config.defaultUserGroupValue !== undefined;
     const legacyValue = config.defaultUserGroupId;
+    const values =
+      config.defaultUserGroupValue !== undefined
+        ? [config.defaultUserGroupValue]
+        : legacyValue !== undefined
+          ? [legacyValue]
+          : [];
     return {
       enabled: hasModernDefault
-        ? this.booleanConfig(config.defaultUserGroupEnabled)
+        ? booleanConfig(config.defaultUserGroupEnabled)
         : legacyValue !== undefined,
       mode: hasModernDefault
         ? this.groupMode(config.defaultUserGroupMode, 'defaultUserGroupMode')
@@ -760,15 +771,8 @@ export class CmdbuildConnectorService implements Connector {
         config.defaultUserGroupValue !== undefined
           ? config.defaultUserGroupValue
           : legacyValue,
+      values,
     };
-  }
-
-  private booleanConfig(value: unknown): boolean {
-    return (
-      value === true ||
-      (typeof value === 'string' &&
-        ['true', '1', 'yes', 'on'].includes(value.trim().toLowerCase()))
-    );
   }
 
   private groupMode(value: unknown, fieldName: string): CmdbuildGroupMode {
@@ -790,9 +794,7 @@ export class CmdbuildConnectorService implements Connector {
     mode: CmdbuildGroupMode,
     values: unknown[],
   ): Promise<Array<{ _id: string | number }>> {
-    const normalized = values
-      .map((value) => this.groupValue(value))
-      .filter((value): value is string | number => value !== undefined);
+    const normalized = groupRefValues(values, mode, 'groups');
 
     if (mode === 'id') {
       return normalized.map((value) => ({ _id: value }));
@@ -800,19 +802,6 @@ export class CmdbuildConnectorService implements Connector {
 
     const roleIds = await this.resolveRoleNames(config, normalized.map(String));
     return roleIds.map((value) => ({ _id: value }));
-  }
-
-  private groupValue(value: unknown): string | number | undefined {
-    if (typeof value === 'number' && Number.isFinite(value)) {
-      return value;
-    }
-    if (typeof value !== 'string') {
-      throw new Error(
-        'Invalid CMDBuild groups value: expected string or number',
-      );
-    }
-    const trimmed = value.trim();
-    return trimmed ? trimmed : undefined;
   }
 
   private async resolveRoleNames(

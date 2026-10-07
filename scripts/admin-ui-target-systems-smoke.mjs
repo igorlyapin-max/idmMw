@@ -94,8 +94,11 @@ try {
       'Legacy defaultUserGroupId was not migrated in the UI form',
     );
   }
-  await defaultGroupEnabled.uncheck();
   await page.locator('#config-defaultUserGroupValue').fill('');
+  await defaultGroupEnabled.uncheck();
+  if (!(await page.locator('#config-defaultUserGroupValue').isDisabled())) {
+    throw new Error('Default group value remained enabled after uncheck');
+  }
   await page.getByRole('button', { name: 'Update', exact: true }).click();
   await page.getByText('Updated successfully').waitFor();
 

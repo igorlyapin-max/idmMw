@@ -148,6 +148,61 @@ describe('TargetSystemService', () => {
       ).rejects.toBeInstanceOf(BadRequestException);
       expect(prisma.targetSystem.create).not.toHaveBeenCalled();
     });
+
+    it('should reject invalid common group mapping mode', async () => {
+      await expect(
+        service.create({
+          name: 'pg',
+          type: 'postgres-role',
+          label: 'PostgreSQL',
+          config: { connectionString: 'postgres://db', groupMappingMode: 'dn' },
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(prisma.targetSystem.create).not.toHaveBeenCalled();
+    });
+
+    it('should reject common group mapping config for CMDBuild', async () => {
+      await expect(
+        service.create({
+          name: 'cmdb',
+          type: 'cmdbuild',
+          label: 'CMDB',
+          config: {
+            baseUrl: 'http://c',
+            groupMappingEnabled: true,
+            groupMappingMode: 'code',
+          },
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      await expect(
+        service.create({
+          name: 'cmdb',
+          type: 'cmdbuild',
+          label: 'CMDB',
+          config: {
+            baseUrl: 'http://c',
+            defaultGroups: ['TestUserAdmin'],
+          },
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(prisma.targetSystem.create).not.toHaveBeenCalled();
+    });
+
+    it('should reject invalid Linux group mapping target', async () => {
+      await expect(
+        service.create({
+          name: 'linux',
+          type: 'linux',
+          label: 'Linux',
+          config: {
+            provider: 'ssh-sudo',
+            groupMappingEnabled: true,
+            groupMappingTarget: 'inventory',
+          },
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(prisma.targetSystem.create).not.toHaveBeenCalled();
+    });
   });
 
   describe('update', () => {

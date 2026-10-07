@@ -152,6 +152,108 @@ describe('PassworkConnectorService', () => {
       expect(calls[0][0].data).toEqual({ username: 'ivanov' });
     });
 
+    it('should map generic IDM groups to Passwork user group membership after user create', async () => {
+      httpService.request
+        .mockReturnValueOnce(
+          of({ data: { groups: [{ id: 'g1', name: 'Operators' }] } }),
+        )
+        .mockReturnValueOnce(of({ data: { id: 'u1' } }))
+        .mockReturnValueOnce(of({ data: { ok: true } }));
+
+      const result = await service.execute({
+        operation: 'user.create',
+        targetSystem: 'passwork-prod',
+        payload: {
+          config: {
+            ...config(),
+            groupMappingEnabled: true,
+            groupMappingMode: 'name',
+          },
+          data: {
+            username: 'ivanov',
+            groups: [{ name: 'Operators' }],
+          },
+        },
+      });
+
+      expect(result).toEqual({ success: true, data: { id: 'u1' } });
+      const calls = httpService.request.mock.calls as PassworkRequestCall[];
+      expect(calls[0][0]).toMatchObject({
+        method: 'GET',
+        url: 'https://passwork.local/api/v1/user-groups?limit=500',
+      });
+      expect(calls[1][0]).toMatchObject({
+        method: 'POST',
+        url: 'https://passwork.local/api/v1/users',
+        data: { username: 'ivanov' },
+      });
+      expect(calls[2][0]).toMatchObject({
+        method: 'POST',
+        url: 'https://passwork.local/api/v1/user-groups/g1/add-users',
+        data: { userIds: ['u1'] },
+      });
+    });
+
+    it('should ignore default and incoming groups when Passwork group mapping is disabled', async () => {
+      httpService.request.mockReturnValueOnce(of({ data: { id: 'u1' } }));
+
+      const result = await service.execute({
+        operation: 'user.create',
+        targetSystem: 'passwork-prod',
+        payload: {
+          config: {
+            ...config(),
+            groupMappingEnabled: false,
+            defaultGroups: [{ name: 'Operators' }],
+          },
+          data: {
+            username: 'ivanov',
+            groups: [{ name: 'Auditors' }],
+          },
+        },
+      });
+
+      expect(result).toEqual({ success: true, data: { id: 'u1' } });
+      const calls = httpService.request.mock.calls as PassworkRequestCall[];
+      expect(calls).toHaveLength(1);
+      expect(calls[0][0]).toMatchObject({
+        method: 'POST',
+        url: 'https://passwork.local/api/v1/users',
+        data: { username: 'ivanov' },
+      });
+    });
+
+    it('should resolve Passwork groups before user create', async () => {
+      httpService.request.mockReturnValueOnce(of({ data: { groups: [] } }));
+
+      const result = await service.execute({
+        operation: 'user.create',
+        targetSystem: 'passwork-prod',
+        payload: {
+          config: {
+            ...config(),
+            groupMappingEnabled: true,
+            groupMappingMode: 'name',
+          },
+          data: {
+            username: 'ivanov',
+            groups: [{ name: 'Missing' }],
+          },
+        },
+      });
+
+      expect(result).toEqual({
+        success: false,
+        error: 'Passwork user group not found by name: Missing',
+      });
+      const calls = httpService.request.mock.calls as PassworkRequestCall[];
+      expect(calls).toHaveLength(1);
+      expect(calls[0][0]).toMatchObject({
+        method: 'GET',
+        url: 'https://passwork.local/api/v1/user-groups?limit=500',
+      });
+    });
+
     it('should map group CRUD and membership routes', async () => {
       httpService.request.mockReturnValue(of({ data: { ok: true } }));
 

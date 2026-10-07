@@ -12,8 +12,13 @@ import {
   DbConnectorTlsConfig,
   TlsOptionsFactory,
 } from '../../../security/tls-options.factory';
+import {
+  groupMappingSettings,
+  groupRefValues,
+  type GroupMappingConfig,
+} from '../../group-mapping.util';
 
-interface PostgresRoleConfig {
+interface PostgresRoleConfig extends GroupMappingConfig {
   connectionString?: string;
   tls?: DbConnectorTlsConfig;
   rolePrefix?: string;
@@ -22,6 +27,7 @@ interface PostgresRoleConfig {
   permissionPolicyMode?: 'disabled' | 'managed-allowlist' | 'idm-full-control';
   allowedPermissions?: PostgresPermission[];
   defaultDatabase?: string;
+  defaultGroups?: unknown[];
   defaultLogin?: boolean;
   defaultRoles?: string[];
   defaultPermissions?: PostgresPermission[];
@@ -37,6 +43,7 @@ interface PostgresUserData extends Record<string, unknown> {
   email?: unknown;
   password?: unknown;
   newValue?: unknown;
+  groups?: unknown;
   roles?: unknown;
   permissions?: unknown;
   enabled?: unknown;
@@ -577,9 +584,23 @@ export class PostgresRoleConnectorService implements Connector {
     const payloadRoles = Array.isArray(data.roles)
       ? data.roles.filter((role): role is string => typeof role === 'string')
       : [];
+    const mapping = groupMappingSettings(config);
+    const mappedGroups = mapping.enabled
+      ? groupRefValues(data.groups, mapping.mode, 'groups').map(String)
+      : [];
+    const defaultGroups =
+      includeDefaults && mapping.enabled && config.defaultGroups !== undefined
+        ? groupRefValues(
+            config.defaultGroups,
+            mapping.mode,
+            'defaultGroups',
+          ).map(String)
+        : [];
     const roles = [
       ...(includeDefaults ? (config.defaultRoles ?? []) : []),
+      ...defaultGroups,
       ...payloadRoles,
+      ...mappedGroups,
     ];
     return roles
       .filter(

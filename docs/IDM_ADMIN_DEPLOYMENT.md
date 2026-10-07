@@ -151,11 +151,38 @@ CMDBuild user create diagnostics:
   найденный `_id`. Само поле `groups` никогда не передается дальше в
   CMDBuild `/users`: если маппинг выключен, оно удаляется из outbound payload.
   Пустые значения `groups` игнорируются; если настроена fallback-группа, она
-  будет применена. Нестроковые и нечисловые элементы `groups` отклоняются
-  controlled error `Invalid CMDBuild groups value: expected string or number`.
+  будет применена. Нестроковые, нечисловые и не соответствующие выбранному
+  режиму элементы `groups` отклоняются controlled error вида
+  `Invalid groups.id: expected string or number` или
+  `Invalid groups item: expected string, number or object with id/name/code`.
+- Common group mapping поля `groupMappingEnabled`, `groupMappingMode` и
+  `defaultGroups` для `cmdbuild` не поддерживаются; используйте только
+  `defaultUserGroup*` и `incomingGroups*`.
 - Для отображаемого имени используйте `description`. Поля `firstName` и
   `lastName` передаются в CMDBuild как есть и не собираются idmMw в
   `description`.
+
+Common IDM group mapping:
+
+- Для group-aware коннекторов входящее `payload.data.groups` может быть массивом
+  строк/чисел или объектов `{ "id": "..." }`, `{ "name": "..." }`,
+  `{ "code": "..." }`.
+- Общие настройки `TargetSystem.config`: `groupMappingEnabled=true`,
+  `groupMappingMode=id|name|code`, `defaultGroups=[...]`.
+- `defaultGroups` применяются только когда `groupMappingEnabled=true`; при
+  выключенном mapping common `groups` и `defaultGroups` игнорируются.
+- `postgres-role` и `mssql-login` применяют включенный mapping как роли,
+  назначаемые пользователю при `user.create`/`user.update`.
+- `linux` сохраняет прежние поля `serverGroups`, `posixGroups` и независимое
+  `defaultGroups` для POSIX default groups; при включенном generic mapping
+  используйте `groupMappingTarget=posix|server`.
+- `passwork` до `user.create` резолвит user group и после успешного создания
+  вызывает membership endpoint `/user-groups/{id}/add-users`. Raw `groups` в
+  `/users` не передается; если group lookup неуспешен, пользователь не
+  создается.
+- Для коннекторов без group semantics generic `groups` не является общим
+  разрешением на выдачу прав.
+
 - При временном `Verbose` debug для `targetSystem=CMDB` логи содержат:
   `cmdbuild.user.create.diagnostic` с shape payload (`hasPassword`,
   `hasUserGroups`, `userGroupIds`, hints) и

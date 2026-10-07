@@ -195,10 +195,13 @@ export class TargetSystemService {
     type: string,
     config: Record<string, unknown>,
   ): void {
+    this.validateCommonGroupMappingConfig(type, config);
+
     if (type !== 'cmdbuild') {
       return;
     }
 
+    this.rejectCmdbuildCommonGroupMapping(config);
     this.validateCmdbuildGroupMode(
       config['defaultUserGroupMode'],
       'defaultUserGroupMode',
@@ -218,6 +221,54 @@ export class TargetSystemService {
     }
   }
 
+  private validateCommonGroupMappingConfig(
+    type: string,
+    config: Record<string, unknown>,
+  ): void {
+    const groupAwareTypes = [
+      'postgres-role',
+      'mssql-login',
+      'linux',
+      'passwork',
+    ];
+    if (!groupAwareTypes.includes(type)) {
+      return;
+    }
+
+    this.validateGroupMappingMode(config['groupMappingMode']);
+    if (type === 'linux') {
+      this.validateLinuxGroupMappingTarget(config['groupMappingTarget']);
+    }
+    if (
+      config['defaultGroups'] !== undefined &&
+      !Array.isArray(config['defaultGroups'])
+    ) {
+      throw new BadRequestException('Invalid defaultGroups: expected array');
+    }
+  }
+
+  private validateGroupMappingMode(value: unknown): void {
+    if (value === undefined || value === null || value === '') {
+      return;
+    }
+    if (typeof value !== 'string' || !['id', 'name', 'code'].includes(value)) {
+      throw new BadRequestException(
+        'Invalid groupMappingMode: expected id, name or code',
+      );
+    }
+  }
+
+  private validateLinuxGroupMappingTarget(value: unknown): void {
+    if (value === undefined || value === null || value === '') {
+      return;
+    }
+    if (typeof value !== 'string' || !['posix', 'server'].includes(value)) {
+      throw new BadRequestException(
+        'Invalid Linux groupMappingTarget: expected posix or server',
+      );
+    }
+  }
+
   private validateCmdbuildGroupMode(value: unknown, fieldName: string): void {
     if (value === undefined || value === null || value === '') {
       return;
@@ -225,6 +276,25 @@ export class TargetSystemService {
     if (typeof value !== 'string' || !['id', 'name'].includes(value)) {
       throw new BadRequestException(
         `Invalid CMDBuild ${fieldName}: expected id or name`,
+      );
+    }
+  }
+
+  private rejectCmdbuildCommonGroupMapping(
+    config: Record<string, unknown>,
+  ): void {
+    const commonFields = [
+      'groupMappingEnabled',
+      'groupMappingMode',
+      'groupMappingTarget',
+      'defaultGroups',
+    ];
+    const present = commonFields.find(
+      (field) => config[field] !== undefined && config[field] !== '',
+    );
+    if (present) {
+      throw new BadRequestException(
+        `CMDBuild ${present} is not supported; use defaultUserGroup* and incomingGroups* settings`,
       );
     }
   }
